@@ -76,7 +76,7 @@ static void CompileExpressionsOnce()
 	}
 
 	// 1) Spawn expression: returns the placed reference (should be a form result)
-	// NOTE: This is an expression, NOT "Begin Function", so it won�t hit your function parser issue.
+	// NOTE: This is an expression, NOT "Begin Function", so it won't hit your function parser issue.
 	_MESSAGE("Compiling spawn expression...");
 	g_spawnExpr = g_script->CompileExpression("Player.PlaceAtMe 0x001206FD 1 0 0");
 	_MESSAGE("Spawn expr ptr: %p", g_spawnExpr);
@@ -92,7 +92,7 @@ static bool EnsureNpcExistsInMemory()
 		if (ResolveRefr(g_npcRefID))
 			return true;
 
-		// If the ref can�t be resolved (unloaded, destroyed, etc.), drop it.
+		// If the ref can't be resolved (unloaded, destroyed, etc.), drop it.
 		_MESSAGE("NPC refID %08X not resolvable; will respawn", g_npcRefID);
 		g_npcRefID = 0;
 	}
@@ -151,6 +151,7 @@ static void MoveNpcToTarget()
 		"SetAngle Z %f",
 		kPX, kPY, kPZ, kRX, kRY, kRZ
 	);
+
 	// Patch Console::Print to "retn 8" so RunScriptLine2 produces no output
 	SafeWrite8(s_Console__Print + 0, 0xC2);
 	SafeWrite8(s_Console__Print + 1, 0x08);
