@@ -1,0 +1,82 @@
+﻿# GECK Non-Function Pages Index
+# Format: Title | Summary | Categories
+
+Ar BadNumericIndex | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar BadStringIndex | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar Copy | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar CustomSort | ==Example (lambda)== | Functions_(NVSE); Array Functions; User Defined Functions; NVSE-Aware Functions
+Ar DeepCopy | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar DumpID | ==Example== | Functions_(NVSE); Array Functions; Debugging
+Ar Find | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar First | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar HasKey | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar Keys | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar Last | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar Next | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar Null | ==Example== | Functions_(NVSE); Array Functions
+Ar Packed | |example = }} | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar Prev | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar Resize | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar Size | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar Sort | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+Ar SortAlpha | ==Example== | Functions_(NVSE); Array Functions; NVSE-Aware Functions
+ARES NVSE | This page lists functions added by the [https://www.nexusmods.com/newvegas/mods/78078 ARES NVSE Plugin] | Functions (All); Functions
+BuildRef | ==Example== | Functions_(NVSE); File Functions; ID Functions; Functions_(Command Extender); Functions (FO3)
+ClearBit | ==Example== | Functions_(NVSE); Bit Functions
+Complete List of Functions in Fallout 3 | The following is a complete list of all registered functions available in Fallout 3 and its FOSE extenders. Note that some may be console only, and unavailable in the GECK. Some may also be unused and | Functions (GECK); Functions; Console Functions
+Complete List of Functions in Fallout New Vegas (OLD LIST) | The following is a complete list of almost all registered functions available in Fallout: New Vegas and its NVSE extenders. Note that some may be console only, and unavailable in the GECK. Some may al | Functions (GECK); Functions; Console Functions
+Eval | Eval is required to test the value of user defined functions, and those related to arrays and strings in if conditionals, as the vanilla compiler will otherwise misunderstand them. This is because the | Commands; Scripting; Functions_(NVSE); Array Functions; String Functions; User Defined Functions; NVSE-Aware Functions
+GameDaysPassed | #REDIRECT Special Variables | Functions (GECK); Functions; Time Functions
+GetActorBaseFlagsHigh | ==Example== | Functions_(NVSE); Bit Functions; Flag Functions; Actor Functions
+GetActorBaseFlagsLow | ==Example== | Functions_(NVSE); Bit Functions; Flag Functions; Actor Functions
+GetAmmoCasing | ==Example== | Functions_(NVSE); Ammo Functions; Weapon Functions
+GetBit | ==Example== | Functions_(NVSE); Bit Functions
+GetDebugSelection | ==Example== | Functions_(NVSE); Debugging
+GetEquipmentBipedMask | ==Bit Fields== | Functions_(NVSE); Bit Functions; Armor Functions
+GetEquipmentSlotsMask | ==Example== | Functions_(NVSE); Bit Functions; Armor Functions
+GetEquippedWeaponModFlags | ==Example== | Functions_(NVSE); Weapon Functions; Actor Functions; Bit Functions; Condition Functions; Flag Functions
+GetEyesFlags | ==Example== | Functions_(NVSE); Bit Functions; Eye Functions; Flag Functions
+GetFlagsHigh | ==Example== | Functions_(NVSE); Bit Functions; Functions_(Command Extender); Functions (FO3); Flag Functions
+GetFlagsLow | ==Example== | Functions_(NVSE); Bit Functions; Functions_(Command Extender); Functions (FO3); Flag Functions
+GetHairFlags | ==Example== | Functions_(NVSE); Bit Functions; Hair Functions; Flag Functions
+GetIdleDoneOnce | Link to UESP Construction Set Wiki: [https://cs.uesp.net/wiki/GetIdleDoneOnce GetIdleDoneOnce]. | Functions (GECK); Functions; Animation Functions; Functions (FO3); Condition Functions
+GetInventoryObject | ==Example== | Functions_(FOSE); Functions_(NVSE); Inventory Functions; Functions (FO3)
+GetLocalRefIndex | ==Example== | Functions_(NVSE)
+GetNthModName | ==Example== | Functions_(NVSE); Debugging; File Functions; Name Functions; String Functions
+GetShouldAttack | Link to UESP Construction Set Wiki: [https://cs.uesp.net/wiki/GetShouldAttack GetShouldAttack]. | Functions (GECK); Functions; Combat Functions; Condition Functions; Functions (FO3)
+GetWeaponFlags1 | ==Example== | Functions_(NVSE); Weapon Functions; Bit Functions; Functions_(Command Extender); Condition Functions; Functions (FO3); Flag Functions
+GetWeaponFlags2 | ==Example== | Functions_(NVSE); Weapon Functions; Bit Functions; Functions_(Command Extender); Condition Functions; Engine Differences (Fallout); Functions (FO3); Flag Functions
+GetWeaponItemModEffect | ==Example== | Functions_(NVSE); Weapon Functions
+GetWeaponItemModValue1 | ==Example== | Functions_(NVSE); Weapon Functions
+GetWeaponItemModValue2 | ==Example== | Functions_(NVSE); Weapon Functions
+GetWeaponRequiredSkill | ==Example== | Functions_(NVSE); Weapon Functions; Actor Value Functions; Condition Functions
+GetWeaponRequiredStrength | ==Example== | Functions_(NVSE); Weapon Functions; Actor Value Functions; Condition Functions
+IsEquipped | ==Example== | Functions_(NVSE); Inventory Functions; Inventory Reference Functions
+IsLoadDoor | ==Example== | Functions_(NVSE); Door Functions; Functions (ButcherPete FOSE); Functions (FO3)
+IsPluginInstalled | ==Example== | Functions_(NVSE); File Functions; Debugging
+Let | ==Example== | Commands; Scripting; Functions_(NVSE); Array Functions; String Functions; User Defined Functions; NVSE-Aware_Functions
+PickFromList | ==Example== | Functions_(JIP)
+PickOneOf | ==Example== | Functions_(NVSE)
+PrintDebug | ==Example== | Functions_(NVSE); Debugging; String Functions; NVSE-Aware Functions
+SetActorBaseFlagsHigh | ==Example== | Functions_(NVSE); Bit Functions; Flag Functions; Actor Functions
+SetActorBaseFlagsLow | ==Example== | Functions_(NVSE); Bit Functions; Flag Functions; Actor Functions
+SetBit | ==Example== | Functions_(NVSE); Bit Functions
+SetEquipmentBipedMask | ==Bit Fields== | Functions_(NVSE); Bit Functions; Armor Functions
+SetEquipmentSlotsMask | ==Example== | Functions_(NVSE); Bit Functions; Armor Functions
+SetEquippedWeaponModFlags | ==Example== | Functions_(NVSE); Weapon Functions; Bit Functions; Flag Functions
+SetEyesFlags | ==Example== | Functions_(NVSE); Bit Functions; Eye Functions; Flag Functions
+SetFlagsHigh | ==Bit fields== | Functions_(NVSE); Bit Functions; Functions_(Command Extender); Flag Functions
+SetFlagsLow | ==Bit fields== | Functions_(NVSE); Bit Functions; Functions_(Command Extender); Flag Functions
+SetHairFlags | ==Example== | Functions_(NVSE); Bit Functions; Hair Functions; Flag Functions
+SetIsPlayable | ==Example== | Functions_(NVSE)
+SetModelPathEx | ==Example== | Functions_(NVSE); String Functions; Model Functions; File Functions
+SetWeaponFlags1 | ==Example== | Functions_(NVSE); Weapon Functions; Bit Functions; Functions_(Command Extender); Flag Functions
+SetWeaponFlags2 | ==Example== | Functions_(NVSE); Weapon Functions; Bit Functions; Flag Functions; Functions_(Command Extender); Engine Differences (Fallout)
+SetWeaponRequiredSkill | ==Example== | Functions_(NVSE); Weapon Functions; Actor Value Functions
+SetWeaponRequiredStrength | ==Example== | Functions_(NVSE); Weapon Functions; Actor Value Functions
+SetWeaponSkill | ==Example== | Functions_(NVSE); Weapon Functions; Actor Value Functions
+ShowCaravanMenu | This will initiate a game of caravan with Jack, with Jack using CaravanDeckJack, playing with a difficulty rating 0 out of 3, and betting at maximum 30% of the currency he holds. | Functions (Vegas); Functions; UI Functions
+SkipAnim | Link to UESP Construction Set Wiki: [https://cs.uesp.net/wiki/SkipAnim SkipAnim]. | Functions (GECK); Functions; Animation Functions
+StartMisterSandman | Used in the Mister Sandman perk's Activate script to play the associated animation and sound. | Functions (GECK); Functions
+TestExpr | ==Example== | Functions_(NVSE); Debugging; NVSE-Aware Functions
+V3Normalize | ==Example== | Functions_(NVSE); Algohol Functions; Math Functions

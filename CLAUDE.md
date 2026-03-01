@@ -33,3 +33,23 @@ This is a **multiplayer mod** for Fallout: New Vegas. Spawned "NPCs" are actuall
   - Note: NVSE's own source has a typo (`0x88` instead of `0x8B`) in the restore path.
 - **`SafeWrite.h` / `SafeWrite.cpp`** are compiled into the plugin and available for runtime patching.
 - **Don't trust NVSE API parameters blindly.** Read the NVSE source to verify what's actually implemented vs stubbed/commented out.
+
+## GECK wiki reference (scripting commands & anim groups)
+
+`geck_wiki_resource/` contains a full GECK wiki XML export and pre-built index files for fast lookup.
+
+### Index files (search these, don't read the raw XML)
+
+- **`geck_wiki_resource/geck_function_index.txt`** — 2500+ functions. One line per function: `Name | Origin | Signature | Summary | Categories`. Grep this for keywords when the user asks about scripting commands.
+- **`geck_wiki_resource/geck_anim_groups.txt`** — All animation group IDs (hex, decimal, name). Grep for animation-related questions.
+- **`geck_wiki_resource/geck_other_pages_index.txt`** — Non-function wiki pages (guides, category listings).
+
+### Lookup workflow
+
+1. Grep the index file(s) for keywords related to the user's question (e.g. `weapon|holster|draw` for "how to unholster weapon").
+2. Identify the relevant function(s) from the results.
+3. If full details are needed (arguments, notes, caveats), grep the original XML: `geck_wiki_resource/GECK-20260301214412.xml` for `<title>FunctionName</title>` and read that page's `<text>` block.
+
+### Rebuilding the index
+
+If the XML is updated, re-run: `powershell -ExecutionPolicy Bypass -File geck_wiki_resource/build_index.ps1`
