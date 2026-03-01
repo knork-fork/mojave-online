@@ -1,0 +1,4 @@
+LIBRARY	"fnvmp"
+EXPORTS
+NVSEPlugin_Query
+NVSEPlugin_Load

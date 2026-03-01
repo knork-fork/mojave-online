@@ -5,14 +5,15 @@
 Run MSBuild against the solution:
 
 ```
-"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" nvse_plugin_example\nvse_plugin_example.sln -p:Configuration=Release -p:Platform=Win32 -m
+"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" fnvmp\fnvmp.sln -p:Configuration=Release -p:Platform=Win32 -m
 ```
 
-Post-build step copies the DLL to `C:\Games\Fallout New Vegas\Data\NVSE\Plugins\nvse_plugin_example.dll`.
+Post-build step copies the DLL to `C:\Games\Fallout New Vegas\Data\NVSE\Plugins\fnvmp.dll`.
 
 ## Project structure
 
-- `nvse_plugin_example/` - our plugin source (main.cpp, .vcxproj, .sln)
+- `fnvmp/` - main plugin source (main.cpp, .vcxproj, .sln)
+- `nvse_plugin_example/` - original NVSE example plugin (kept as working prototype reference)
 - `nvse/nvse/` - NVSE source headers and cpp files compiled into the plugin
 - `common/` - shared utility lib (common_vc9)
 
