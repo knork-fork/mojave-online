@@ -16,6 +16,14 @@ Post-build step copies the DLL to `C:\Games\Fallout New Vegas\Data\NVSE\Plugins\
 - `nvse/nvse/` - NVSE source headers and cpp files compiled into the plugin
 - `common/` - shared utility lib (common_vc9)
 
+## What this project is
+
+This is a **multiplayer mod** for Fallout: New Vegas. Spawned "NPCs" are actually **avatars representing other players** connected to a server. Their position, rotation, and animation state are received from the network and applied locally. Key implications:
+
+- **No AI packages or engine pathfinding.** Avatar transforms are driven entirely by server data — the engine must not autonomously decide where to move them.
+- **Per-tick position updates.** Avatar positions must be updated every game tick for smooth movement, interpolating between network updates.
+- **Hardcoded positions are temporary.** Current constants are placeholders; real data will come from the server.
+
 ## NVSE API gotchas
 
 - **`RunScriptLine2` bSuppressConsoleOutput is broken.** The `ToggleConsoleOutput` calls in `GameScript.cpp:349,366` are commented out. The bool parameter does nothing.
