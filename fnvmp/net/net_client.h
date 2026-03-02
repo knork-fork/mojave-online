@@ -1,7 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 #include <enet/enet.h>
+
+struct EntityState;
 
 // Thin wrapper around ENet client operations for fnvmp.dll.
 // Manages connection to server, heartbeat sending, and packet dispatch.
@@ -28,6 +31,15 @@ public:
     bool IsConnected() const { return m_connected; }
     uint32_t GetNetEntityId() const { return m_netEntityId; }
 
+    // World snapshot access (written by Poll, read by main loop)
+    bool HasNewWorldSnapshot() const { return m_hasNewWorldSnapshot; }
+    const std::vector<EntityState>& GetWorldEntities() const { return m_worldEntities; }
+    void ClearWorldSnapshot() { m_hasNewWorldSnapshot = false; }
+
+    // Disconnect events (queued by Poll, consumed by main loop)
+    bool HasDisconnectEvents() const { return !m_disconnectedEntities.empty(); }
+    std::vector<uint32_t> TakeDisconnectEvents();
+
 private:
     void HandleReceive(ENetEvent& event);
     void SendHeartbeat();
@@ -40,4 +52,11 @@ private:
 
     double   m_heartbeatAccum = 0.0;
     uint16_t m_snapshotSeq    = 0;
+
+    // Latest world snapshot from server
+    bool m_hasNewWorldSnapshot = false;
+    std::vector<EntityState> m_worldEntities;
+
+    // Queued disconnect events
+    std::vector<uint32_t> m_disconnectedEntities;
 };

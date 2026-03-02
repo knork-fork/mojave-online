@@ -12,7 +12,7 @@ struct PlayerInfo {
     uint32_t netEntityId;
     double   lastHeartbeat;  // seconds since server start
 
-    // Latest received snapshot (v0.2)
+    // Latest received snapshot
     bool     hasSnapshot    = false;
     uint16_t lastSequence   = 0;
     uint32_t cellId         = 0;
@@ -27,11 +27,19 @@ static uint32_t g_nextEntityId = 1;
 static std::map<ENetPeer*, PlayerInfo> g_players;
 static bool g_verbose = false;
 
+// Broadcast timer
+static double g_lastBroadcastTime = 0.0;
+static double g_broadcastAccum    = 0.0;
+
 // Monotonic clock in seconds
 static double GetTime()
 {
     return (double)clock() / CLOCKS_PER_SEC;
 }
+
+// --------------------------------------------------
+// Send helpers
+// --------------------------------------------------
 
 static void SendConnectAck(ENetPeer* peer, uint32_t netEntityId)
 {
@@ -42,6 +50,78 @@ static void SendConnectAck(ENetPeer* peer, uint32_t netEntityId)
     ENetPacket* packet = enet_packet_create(&ack, sizeof(ack), ENET_PACKET_FLAG_RELIABLE);
     enet_peer_send(peer, CHANNEL_SYSTEM, packet);
 }
+
+static void BroadcastPlayerConnect(uint32_t netEntityId, ENetPeer* exclude)
+{
+    MsgPlayerConnect msg;
+    msg.msgType = MSG_PLAYER_CONNECT;
+    msg.netEntityId = netEntityId;
+
+    for (auto& kv : g_players) {
+        if (kv.first == exclude) continue;
+        ENetPacket* packet = enet_packet_create(&msg, sizeof(msg), ENET_PACKET_FLAG_RELIABLE);
+        enet_peer_send(kv.first, CHANNEL_GAME_EVENTS, packet);
+    }
+}
+
+static void BroadcastPlayerDisconnect(uint32_t netEntityId, ENetPeer* exclude)
+{
+    MsgPlayerDisconnect msg;
+    msg.msgType = MSG_PLAYER_DISCONNECT;
+    msg.netEntityId = netEntityId;
+
+    for (auto& kv : g_players) {
+        if (kv.first == exclude) continue;
+        ENetPacket* packet = enet_packet_create(&msg, sizeof(msg), ENET_PACKET_FLAG_RELIABLE);
+        enet_peer_send(kv.first, CHANNEL_GAME_EVENTS, packet);
+    }
+}
+
+// Build and send a WorldSnapshot to each peer containing all OTHER peers' states
+static void BroadcastWorldSnapshots()
+{
+    if (g_players.size() < 2) return;
+
+    // Stack buffer: header + up to MAX_PLAYERS EntityStates
+    uint8_t buf[sizeof(MsgWorldSnapshotHeader) + MAX_PLAYERS * sizeof(EntityState)];
+
+    for (auto& recipient : g_players) {
+        MsgWorldSnapshotHeader* hdr = reinterpret_cast<MsgWorldSnapshotHeader*>(buf);
+        hdr->msgType = MSG_WORLD_SNAPSHOT;
+        hdr->entityCount = 0;
+
+        EntityState* states = reinterpret_cast<EntityState*>(buf + sizeof(MsgWorldSnapshotHeader));
+
+        for (auto& other : g_players) {
+            if (other.first == recipient.first) continue;
+            if (!other.second.hasSnapshot) continue;
+
+            const PlayerInfo& pi = other.second;
+            EntityState& es = states[hdr->entityCount];
+            es.netEntityId  = pi.netEntityId;
+            es.cellId       = pi.cellId;
+            es.posX         = pi.posX;
+            es.posY         = pi.posY;
+            es.posZ         = pi.posZ;
+            es.rotZ         = pi.rotZ;
+            es.movementState = pi.movementState;
+            es.weaponFormId  = pi.weaponFormId;
+            es.actionState   = pi.actionState;
+
+            hdr->entityCount++;
+        }
+
+        if (hdr->entityCount == 0) continue;
+
+        size_t totalLen = sizeof(MsgWorldSnapshotHeader) + hdr->entityCount * sizeof(EntityState);
+        ENetPacket* packet = enet_packet_create(buf, totalLen, ENET_PACKET_FLAG_UNSEQUENCED);
+        enet_peer_send(recipient.first, CHANNEL_UNRELIABLE, packet);
+    }
+}
+
+// --------------------------------------------------
+// Receive handler
+// --------------------------------------------------
 
 static void HandleReceive(ENetPeer* peer, ENetPacket* packet)
 {
@@ -61,6 +141,7 @@ static void HandleReceive(ENetPeer* peer, ENetPacket* packet)
     case MSG_DISCONNECT: {
         if (it != g_players.end()) {
             printf("Player %u sent disconnect\n", it->second.netEntityId);
+            BroadcastPlayerDisconnect(it->second.netEntityId, peer);
             g_players.erase(it);
             enet_peer_disconnect(peer, 0);
         }
@@ -109,6 +190,10 @@ static void HandleReceive(ENetPeer* peer, ENetPacket* packet)
     }
 }
 
+// --------------------------------------------------
+// Timeout checker
+// --------------------------------------------------
+
 static void CheckTimeouts()
 {
     double now = GetTime();
@@ -118,6 +203,7 @@ static void CheckTimeouts()
         if (elapsed > HEARTBEAT_TIMEOUT) {
             printf("Player %u timed out (%.1fs since last heartbeat)\n",
                    it->second.netEntityId, elapsed);
+            BroadcastPlayerDisconnect(it->second.netEntityId, it->first);
             enet_peer_disconnect(it->first, 0);
             it = g_players.erase(it);
         } else {
@@ -125,6 +211,10 @@ static void CheckTimeouts()
         }
     }
 }
+
+// --------------------------------------------------
+// Main
+// --------------------------------------------------
 
 int main(int argc, char* argv[])
 {
@@ -159,6 +249,8 @@ int main(int argc, char* argv[])
 
     printf("Listening on port %u\n", DEFAULT_PORT);
 
+    g_lastBroadcastTime = GetTime();
+
     ENetEvent event;
     while (true) {
         while (enet_host_service(server, &event, 10) > 0) {
@@ -171,6 +263,7 @@ int main(int argc, char* argv[])
                 g_players[event.peer] = info;
 
                 SendConnectAck(event.peer, id);
+                BroadcastPlayerConnect(id, event.peer);
                 printf("Player %u connected (%u/%zu players)\n",
                        id, (unsigned)g_players.size(), MAX_PLAYERS);
                 break;
@@ -187,6 +280,7 @@ int main(int argc, char* argv[])
                     printf("Player %u disconnected (%u/%zu players)\n",
                            it->second.netEntityId,
                            (unsigned)(g_players.size() - 1), MAX_PLAYERS);
+                    BroadcastPlayerDisconnect(it->second.netEntityId, event.peer);
                     g_players.erase(it);
                 }
                 break;
@@ -198,6 +292,15 @@ int main(int argc, char* argv[])
         }
 
         CheckTimeouts();
+
+        // Broadcast world snapshots at 20 Hz
+        double now = GetTime();
+        g_broadcastAccum += (now - g_lastBroadcastTime);
+        g_lastBroadcastTime = now;
+        while (g_broadcastAccum >= SNAPSHOT_SEND_INTERVAL) {
+            g_broadcastAccum -= SNAPSHOT_SEND_INTERVAL;
+            BroadcastWorldSnapshots();
+        }
     }
 
     // Unreachable, but for completeness

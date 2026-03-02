@@ -58,7 +58,7 @@
 
 ---
 
-## v0.3 — Two-Client Relay + Remote Player Avatar
+## v0.3 — Two-Client Relay + Remote Player Avatar (COMPLETED)
 
 **Goal**: Server relays snapshots between two clients. Each client spawns a visible NPC representing the other player.
 

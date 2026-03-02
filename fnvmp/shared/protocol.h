@@ -3,15 +3,18 @@
 #include <cstdint>
 
 // -----------------------------------------------
-// FNVMP Protocol — v0.2 (Player Snapshot Pipeline)
+// FNVMP Protocol — v0.3 (Two-Client Relay + Remote Player Avatar)
 // Shared between client (fnvmp.dll) and server (server.exe)
 // -----------------------------------------------
 
 enum MessageType : uint8_t {
-    MSG_CONNECT_ACK      = 1,   // server -> client (carries NetEntityId)
-    MSG_HEARTBEAT        = 2,   // client -> server
-    MSG_DISCONNECT       = 3,   // either direction
-    MSG_PLAYER_SNAPSHOT  = 4,   // client -> server (position/rotation/state)
+    MSG_CONNECT_ACK        = 1,   // server -> client (carries NetEntityId)
+    MSG_HEARTBEAT          = 2,   // client -> server
+    MSG_DISCONNECT         = 3,   // either direction
+    MSG_PLAYER_SNAPSHOT    = 4,   // client -> server (position/rotation/state)
+    MSG_WORLD_SNAPSHOT     = 5,   // server -> client (all other players' states)
+    MSG_PLAYER_CONNECT     = 6,   // server -> all (new player joined, reliable)
+    MSG_PLAYER_DISCONNECT  = 7,   // server -> all (player left, reliable)
 };
 
 enum MovementState : uint8_t {
@@ -65,6 +68,33 @@ struct MsgPlayerSnapshot {
     uint8_t  movementState;  // MovementState enum
     uint32_t weaponFormId;   // 0 = holstered
     uint8_t  actionState;    // ActionState enum
+};
+
+// Per-entity state within a WorldSnapshot
+struct EntityState {
+    uint32_t netEntityId;
+    uint32_t cellId;
+    float    posX, posY, posZ;
+    float    rotZ;
+    uint8_t  movementState;
+    uint32_t weaponFormId;
+    uint8_t  actionState;
+};
+
+// Variable-length: header followed by entityCount × EntityState
+struct MsgWorldSnapshotHeader {
+    uint8_t  msgType;        // MSG_WORLD_SNAPSHOT
+    uint16_t entityCount;
+};
+
+struct MsgPlayerConnect {
+    uint8_t  msgType;        // MSG_PLAYER_CONNECT
+    uint32_t netEntityId;
+};
+
+struct MsgPlayerDisconnect {
+    uint8_t  msgType;        // MSG_PLAYER_DISCONNECT
+    uint32_t netEntityId;
 };
 
 #pragma pack(pop)

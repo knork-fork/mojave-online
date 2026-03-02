@@ -79,6 +79,9 @@ void NetClient::Disconnect()
     m_netEntityId = 0;
     m_heartbeatAccum = 0.0;
     m_snapshotSeq = 0;
+    m_hasNewWorldSnapshot = false;
+    m_worldEntities.clear();
+    m_disconnectedEntities.clear();
 
     _MESSAGE("NetClient: disconnected");
 }
@@ -157,6 +160,54 @@ void NetClient::HandleReceive(ENetEvent& event)
         m_netEntityId = 0;
         break;
 
+    case MSG_WORLD_SNAPSHOT: {
+        if (event.packet->dataLength < sizeof(MsgWorldSnapshotHeader)) {
+            _MESSAGE("NetClient: WorldSnapshot too short for header");
+            break;
+        }
+
+        MsgWorldSnapshotHeader hdr;
+        std::memcpy(&hdr, event.packet->data, sizeof(hdr));
+
+        size_t expectedLen = sizeof(MsgWorldSnapshotHeader) + hdr.entityCount * sizeof(EntityState);
+        if (event.packet->dataLength < expectedLen) {
+            _MESSAGE("NetClient: WorldSnapshot too short for %u entities", hdr.entityCount);
+            break;
+        }
+
+        m_worldEntities.resize(hdr.entityCount);
+        if (hdr.entityCount > 0) {
+            std::memcpy(m_worldEntities.data(),
+                        event.packet->data + sizeof(MsgWorldSnapshotHeader),
+                        hdr.entityCount * sizeof(EntityState));
+        }
+        m_hasNewWorldSnapshot = true;
+        break;
+    }
+
+    case MSG_PLAYER_CONNECT: {
+        if (event.packet->dataLength < sizeof(MsgPlayerConnect)) {
+            _MESSAGE("NetClient: PlayerConnect too short");
+            break;
+        }
+        MsgPlayerConnect msg;
+        std::memcpy(&msg, event.packet->data, sizeof(msg));
+        _MESSAGE("NetClient: remote player %u connected", msg.netEntityId);
+        break;
+    }
+
+    case MSG_PLAYER_DISCONNECT: {
+        if (event.packet->dataLength < sizeof(MsgPlayerDisconnect)) {
+            _MESSAGE("NetClient: PlayerDisconnect too short");
+            break;
+        }
+        MsgPlayerDisconnect msg;
+        std::memcpy(&msg, event.packet->data, sizeof(msg));
+        _MESSAGE("NetClient: remote player %u disconnected", msg.netEntityId);
+        m_disconnectedEntities.push_back(msg.netEntityId);
+        break;
+    }
+
     default:
         _MESSAGE("NetClient: unknown message type %u", msgType);
         break;
@@ -178,4 +229,11 @@ void NetClient::SendPlayerSnapshot(MsgPlayerSnapshot& snapshot)
     snapshot.sequence = m_snapshotSeq++;
 
     Send(&snapshot, sizeof(snapshot), CHANNEL_UNRELIABLE, false);
+}
+
+std::vector<uint32_t> NetClient::TakeDisconnectEvents()
+{
+    std::vector<uint32_t> result;
+    result.swap(m_disconnectedEntities);
+    return result;
 }
