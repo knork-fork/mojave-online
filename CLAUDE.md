@@ -16,6 +16,10 @@ Post-build step copies the DLL to `C:\Games\Fallout New Vegas\Data\NVSE\Plugins\
 - `nvse_plugin_example/` - original NVSE example plugin (kept as working prototype reference)
 - `nvse/nvse/` - NVSE source headers and cpp files compiled into the plugin
 - `common/` - shared utility lib (common_vc9)
+- `planning/` - design documents and technical specifications
+  - `initial_plan.txt` - original design notes and decisions
+  - `technical_spec.md` - detailed technical specification (authoritative reference for implementation)
+  - `deferred_features.md` - features explicitly excluded from v1
 
 ## What this project is
 
