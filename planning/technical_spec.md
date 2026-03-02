@@ -291,7 +291,7 @@ Nothing special. When a player enters a cell/zone that doesn't contain other pla
 2. Owner sends `SpawnNPC { baseFormId, position, rotation, isPersistent }`
 3. Server assigns `NetEntityId`, broadcasts to all in zone
 4. Other clients spawn exact same `BaseFormID` manually, map `NetEntityId → local ref`
-5. Non-owners disable AI on their local copy
+5. Non-owners disable AI on their local copy (full AI disable via `SetActorsAI 0` — unlike player avatars, NPC copies don't need to be targetable; they are visual mirrors only)
 
 **Named/persistent NPCs** (already exist in cell):
 - Identified by `FormID + CellID` as identity key

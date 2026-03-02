@@ -178,7 +178,7 @@
   - Sends `DespawnNPC` when NPCs leave/die
 - **Non-owner clients**:
   - Spawn matching NPC (same baseFormId) on receiving SpawnNPC
-  - Disable AI on local copy
+  - Disable AI on local copy (`SetActorsAI 0` — full disable; NPC copies are visual mirrors, not targetable)
   - Apply position/rotation from NPCSnapshots (with interpolation)
   - Apply basic locomotion animation (Idle/Walk/Run) from movementState
 - **Ownership transfer**:
