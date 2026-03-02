@@ -12,7 +12,7 @@
 
 ---
 
-## v0.1 — Network Foundation
+## v0.1 — Network Foundation (COMPLETED)
 
 **Goal**: ENet compiled into both client and server. Two processes can connect, stay connected, and detect disconnection.
 

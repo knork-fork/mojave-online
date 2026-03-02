@@ -5,11 +5,15 @@
 #include "nvse/GameObjects.h"
 #include "nvse/SafeWrite.h"
 
+#include <enet/enet.h>
+#include "protocol.h"
+#include "net_client.h"
+
 // --------------------------------------------------
 // Logging / globals
 // --------------------------------------------------
 
-IDebugLog gLog("luka_test\\hello_world_mvp.log");
+IDebugLog gLog("fnvmp.log");
 
 static PluginHandle g_pluginHandle = kPluginHandle_Invalid;
 
@@ -46,6 +50,10 @@ static const float kRZ = 5.63f;
 static double        g_accum = 0.0;
 static LARGE_INTEGER g_freq{};
 static LARGE_INTEGER g_last{};
+
+// Networking
+static NetClient g_netClient;
+static bool g_enetInitialized = false;
 
 // --------------------------------------------------
 // Helpers
@@ -202,11 +210,36 @@ static void MessageHandler(NVSEMessagingInterface::Message* msg)
 {
 	if (!msg) return;
 
+	// Clean up networking on game exit
+	if (msg->type == NVSEMessagingInterface::kMessage_ExitGame ||
+		msg->type == NVSEMessagingInterface::kMessage_ExitGame_Console)
+	{
+		_MESSAGE("Game exiting — disconnecting network");
+		g_netClient.Disconnect();
+		if (g_enetInitialized)
+		{
+			enet_deinitialize();
+			g_enetInitialized = false;
+		}
+		return;
+	}
+
 	// Compile expressions at DeferredInit (safe point for expression system)
 	if (msg->type == NVSEMessagingInterface::kMessage_DeferredInit)
 	{
 		_MESSAGE("DeferredInit received: compiling expressions");
 		CompileExpressionsOnce();
+
+		// Initialize ENet and connect to server
+		if (enet_initialize() != 0)
+		{
+			_MESSAGE("ERROR: Failed to initialize ENet");
+			return;
+		}
+		g_enetInitialized = true;
+		_MESSAGE("ENet initialized");
+
+		g_netClient.Connect("127.0.0.1", DEFAULT_PORT);
 		return;
 	}
 
@@ -226,6 +259,9 @@ static void MessageHandler(NVSEMessagingInterface::Message* msg)
 	const double dt = double(now.QuadPart - g_last.QuadPart) / double(g_freq.QuadPart);
 	g_last = now;
 
+	// Poll network every tick
+	g_netClient.Poll(dt);
+
 	g_accum += dt;
 	if (g_accum >= 1.0)
 	{
@@ -243,7 +279,7 @@ extern "C"
 	bool NVSEPlugin_Query(const NVSEInterface* nvse, PluginInfo* info)
 	{
 		info->infoVersion = PluginInfo::kInfoVersion;
-		info->name = "HelloWorldMVP";
+		info->name = "FNVMP";
 		info->version = 1;
 
 		if (nvse->nvseVersion < PACKED_NVSE_VERSION)

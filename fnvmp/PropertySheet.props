@@ -3,6 +3,7 @@
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros">
     <FalloutNVPath>C:\Games\Fallout New Vegas</FalloutNVPath>
+    <ServerOutputPath>C:\Games\Fallout New Vegas\Server</ServerOutputPath>
   </PropertyGroup>
   <PropertyGroup>
     <_PropertySheetDisplayName>FalloutNV.props</_PropertySheetDisplayName>

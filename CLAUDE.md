@@ -8,17 +8,25 @@ Run MSBuild against the solution:
 "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" fnvmp\fnvmp.sln -p:Configuration=Release -p:Platform=Win32 -m
 ```
 
-Post-build step copies the DLL to `C:\Games\Fallout New Vegas\Data\NVSE\Plugins\fnvmp.dll`.
+Post-build steps copy:
+- `fnvmp.dll` to `C:\Games\Fallout New Vegas\Data\NVSE\Plugins\fnvmp.dll`
+- `server.exe` to `C:\Games\Fallout New Vegas\Server\server.exe`
 
 ## Project structure
 
-- `fnvmp/` - main plugin source (main.cpp, .vcxproj, .sln)
+- `fnvmp/` - solution root (fnvmp.sln builds both client DLL and server EXE)
+  - `main.cpp` - NVSE plugin entry points and game loop integration
+  - `net/` - client networking (ENet wrapper)
+  - `shared/` - protocol definitions shared between client and server
+  - `server/` - standalone server application (server.vcxproj, server_main.cpp)
+  - `enet/` - vendored ENet 1.3.18 source (networking library)
 - `nvse_plugin_example/` - original NVSE example plugin (kept as working prototype reference)
 - `nvse/nvse/` - NVSE source headers and cpp files compiled into the plugin
 - `common/` - shared utility lib (common_vc9)
 - `planning/` - design documents and technical specifications
   - `initial_plan.txt` - original design notes and decisions
   - `technical_spec.md` - detailed technical specification (authoritative reference for implementation)
+  - `milestones.md` - implementation milestones with test criteria
   - `deferred_features.md` - features explicitly excluded from v1
 
 ## What this project is
