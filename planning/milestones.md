@@ -327,6 +327,7 @@
   - Multiple zone ownership transfers in sequence
   - Player dies while zone owner → ownership transfers, corpse persists
   - Reconnect while corpse is still in the world
+- **Disconnect notice**: when server sends `MSG_DISCONNECT` (or connection is lost), client shows an in-game message box (e.g. "Disconnected from server") and then exits the game
 - Remove all remaining hardcoded values (all come from config or protocol)
 
 **Hardcoded**: nothing
@@ -343,6 +344,7 @@
 7. Player disconnects and reconnects → restored to last state
 8. Force-crash a client → server detects within 5 s, other players unaffected
 9. Server restart → all returning players fully restored from database
+10. Server shuts down while client is playing → client shows disconnect message and exits
 
 ---
 
