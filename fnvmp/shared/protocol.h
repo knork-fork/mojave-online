@@ -3,14 +3,32 @@
 #include <cstdint>
 
 // -----------------------------------------------
-// FNVMP Protocol — v0.1 (Network Foundation)
+// FNVMP Protocol — v0.2 (Player Snapshot Pipeline)
 // Shared between client (fnvmp.dll) and server (server.exe)
 // -----------------------------------------------
 
 enum MessageType : uint8_t {
-    MSG_CONNECT_ACK = 1,   // server -> client (carries NetEntityId)
-    MSG_HEARTBEAT   = 2,   // client -> server
-    MSG_DISCONNECT  = 3,   // either direction
+    MSG_CONNECT_ACK      = 1,   // server -> client (carries NetEntityId)
+    MSG_HEARTBEAT        = 2,   // client -> server
+    MSG_DISCONNECT       = 3,   // either direction
+    MSG_PLAYER_SNAPSHOT  = 4,   // client -> server (position/rotation/state)
+};
+
+enum MovementState : uint8_t {
+    MS_Idle      = 0,
+    MS_Walk      = 1,
+    MS_Run       = 2,
+    MS_Sneak     = 3,
+    MS_SneakWalk = 4,
+    MS_SneakRun  = 5,
+};
+
+enum ActionState : uint8_t {
+    AS_None      = 0,
+    AS_Firing    = 1,
+    AS_Reloading = 2,
+    AS_Melee     = 3,
+    AS_AimingIS  = 4,
 };
 
 // ENet channel assignments
@@ -37,6 +55,18 @@ struct MsgDisconnect {
     uint8_t msgType;       // MSG_DISCONNECT
 };
 
+struct MsgPlayerSnapshot {
+    uint8_t  msgType;        // MSG_PLAYER_SNAPSHOT
+    uint16_t sequence;       // rolling sequence number
+    uint32_t netEntityId;    // assigned by server at connect
+    uint32_t cellId;         // refID of player's current cell
+    float    posX, posY, posZ;
+    float    rotZ;           // yaw only
+    uint8_t  movementState;  // MovementState enum
+    uint32_t weaponFormId;   // 0 = holstered
+    uint8_t  actionState;    // ActionState enum
+};
+
 #pragma pack(pop)
 
 // Timing constants
@@ -45,3 +75,6 @@ static constexpr double HEARTBEAT_TIMEOUT  = 5.0;  // seconds before server cons
 
 static constexpr uint16_t DEFAULT_PORT    = 7777;
 static constexpr size_t   MAX_PLAYERS     = 8;
+
+static constexpr double SNAPSHOT_SEND_RATE     = 20.0;                   // snapshots per second
+static constexpr double SNAPSHOT_SEND_INTERVAL = 1.0 / SNAPSHOT_SEND_RATE;  // ~50ms

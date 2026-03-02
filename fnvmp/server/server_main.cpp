@@ -11,10 +11,21 @@
 struct PlayerInfo {
     uint32_t netEntityId;
     double   lastHeartbeat;  // seconds since server start
+
+    // Latest received snapshot (v0.2)
+    bool     hasSnapshot    = false;
+    uint16_t lastSequence   = 0;
+    uint32_t cellId         = 0;
+    float    posX = 0, posY = 0, posZ = 0;
+    float    rotZ = 0;
+    uint8_t  movementState  = 0;
+    uint32_t weaponFormId   = 0;
+    uint8_t  actionState    = 0;
 };
 
 static uint32_t g_nextEntityId = 1;
 static std::map<ENetPeer*, PlayerInfo> g_players;
+static bool g_verbose = false;
 
 // Monotonic clock in seconds
 static double GetTime()
@@ -56,6 +67,42 @@ static void HandleReceive(ENetPeer* peer, ENetPacket* packet)
         break;
     }
 
+    case MSG_PLAYER_SNAPSHOT: {
+        if (packet->dataLength < sizeof(MsgPlayerSnapshot)) {
+            printf("PlayerSnapshot too short from peer\n");
+            break;
+        }
+        if (it == g_players.end()) break;
+
+        MsgPlayerSnapshot snap;
+        std::memcpy(&snap, packet->data, sizeof(snap));
+
+        if (snap.netEntityId != it->second.netEntityId) {
+            printf("PlayerSnapshot netEntityId mismatch: got %u, expected %u\n",
+                   snap.netEntityId, it->second.netEntityId);
+            break;
+        }
+
+        PlayerInfo& pi = it->second;
+        pi.hasSnapshot   = true;
+        pi.lastSequence  = snap.sequence;
+        pi.cellId        = snap.cellId;
+        pi.posX          = snap.posX;
+        pi.posY          = snap.posY;
+        pi.posZ          = snap.posZ;
+        pi.rotZ          = snap.rotZ;
+        pi.movementState = snap.movementState;
+        pi.weaponFormId  = snap.weaponFormId;
+        pi.actionState   = snap.actionState;
+
+        if (g_verbose) {
+            printf("Player %u snapshot seq=%u cell=%08X pos=(%.1f, %.1f, %.1f) rotZ=%.2f\n",
+                   pi.netEntityId, snap.sequence, snap.cellId,
+                   snap.posX, snap.posY, snap.posZ, snap.rotZ);
+        }
+        break;
+    }
+
     default:
         printf("Unknown message type %u from peer\n", msgType);
         break;
@@ -79,8 +126,15 @@ static void CheckTimeouts()
     }
 }
 
-int main()
+int main(int argc, char* argv[])
 {
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--verbose") == 0) {
+            g_verbose = true;
+            printf("Verbose logging enabled\n");
+        }
+    }
+
     if (enet_initialize() != 0) {
         fprintf(stderr, "Failed to initialize ENet\n");
         return 1;

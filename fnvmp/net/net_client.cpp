@@ -78,6 +78,7 @@ void NetClient::Disconnect()
     m_connected = false;
     m_netEntityId = 0;
     m_heartbeatAccum = 0.0;
+    m_snapshotSeq = 0;
 
     _MESSAGE("NetClient: disconnected");
 }
@@ -167,4 +168,14 @@ void NetClient::SendHeartbeat()
     MsgHeartbeat msg;
     msg.msgType = MSG_HEARTBEAT;
     Send(&msg, sizeof(msg), CHANNEL_SYSTEM, true);
+}
+
+void NetClient::SendPlayerSnapshot(MsgPlayerSnapshot& snapshot)
+{
+    if (!m_connected) return;
+
+    snapshot.msgType = MSG_PLAYER_SNAPSHOT;
+    snapshot.sequence = m_snapshotSeq++;
+
+    Send(&snapshot, sizeof(snapshot), CHANNEL_UNRELIABLE, false);
 }

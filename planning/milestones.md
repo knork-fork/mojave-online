@@ -35,13 +35,13 @@
 
 ---
 
-## v0.2 — Player Snapshot Pipeline (Single Client)
+## v0.2 — Player Snapshot Pipeline (Single Client) (COMPLETED)
 
 **Goal**: Client reads its own position from the game engine and sends it to the server. Server receives and logs it. Proves the full send path works with one client before involving a second.
 
 **Scope**:
-- Client samples local player `posX, posY, posZ, rotZ` every game tick
-- Client sends `PlayerSnapshot` at **20 Hz** (pos + rot only; `movementState` hardcoded to `Idle`, `weaponFormId = 0`, `actionState = None`)
+- Client samples local player `posX, posY, posZ, rotZ, cellId` every game tick (only when a savegame is loaded — `parentCell` must be non-null)
+- Client sends `PlayerSnapshot` at **20 Hz** (pos + rot + cellId; `movementState` hardcoded to `Idle`, `weaponFormId = 0`, `actionState = None`)
 - Server receives `PlayerSnapshot`, logs position to stdout (behind `--verbose` flag; off by default to avoid spam in later milestones)
 - Server stores latest snapshot per connected player (in memory)
 - Sequence numbers added to packet header (`uint16_t`)

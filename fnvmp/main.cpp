@@ -54,6 +54,7 @@ static LARGE_INTEGER g_last{};
 // Networking
 static NetClient g_netClient;
 static bool g_enetInitialized = false;
+static double g_snapshotAccum = 0.0;
 
 // --------------------------------------------------
 // Helpers
@@ -261,6 +262,32 @@ static void MessageHandler(NVSEMessagingInterface::Message* msg)
 
 	// Poll network every tick
 	g_netClient.Poll(dt);
+
+	// Send player snapshot at 20 Hz (only when a savegame is loaded)
+	if (g_netClient.IsConnected() && g_thePlayer && *g_thePlayer
+		&& (*g_thePlayer)->parentCell)
+	{
+		g_snapshotAccum += dt;
+		if (g_snapshotAccum >= SNAPSHOT_SEND_INTERVAL)
+		{
+			g_snapshotAccum -= SNAPSHOT_SEND_INTERVAL;
+
+			TESObjectREFR* player = *g_thePlayer;
+
+			MsgPlayerSnapshot snap;
+			snap.netEntityId   = g_netClient.GetNetEntityId();
+			snap.cellId        = player->parentCell->refID;
+			snap.posX          = player->posX;
+			snap.posY          = player->posY;
+			snap.posZ          = player->posZ;
+			snap.rotZ          = player->rotZ;
+			snap.movementState = MS_Idle;   // hardcoded for v0.2
+			snap.weaponFormId  = 0;         // hardcoded for v0.2
+			snap.actionState   = AS_None;   // hardcoded for v0.2
+
+			g_netClient.SendPlayerSnapshot(snap);
+		}
+	}
 
 	g_accum += dt;
 	if (g_accum >= 1.0)
