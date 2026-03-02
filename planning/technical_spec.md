@@ -269,13 +269,17 @@ Nothing special. When a player enters a cell/zone that doesn't contain other pla
 
 | Type | Description |
 |------|-------------|
-| `Player` | Remote player avatar (AI-disabled NPC) |
+| `Player` | Remote player avatar (restrained companion NPC) |
 | `NPC` | Non-player NPC synced by zone owner |
 
 ### 7.3 Player Avatar Spawning
 
 - Remote players are spawned as NPCs via `PlaceAtMe` or equivalent NVSE call
-- AI is immediately disabled on the spawned NPC
+- Three commands are applied immediately after spawning:
+  1. `SetRestrained 1` — prevents autonomous movement/combat while keeping the NPC visible to the AI system (targetable by hostile NPCs)
+  2. `AddToFaction playerFaction 1` — adds to the player's faction so faction hostility propagates (if player aggros an NPC, that NPC also targets player avatars)
+  3. `SetPlayerTeammate 1` — makes the NPC behave as a combat teammate of the player
+- **Note**: `SetRestrained` causes the NPC to have effectively infinite health (companions go unconscious at 0 HP instead of dying). Death handling for player avatars requires temporarily clearing restrained state and applying damage via script — addressed in v0.8 (Combat).
 - **Single generic base form** for all player avatars (e.g. NCR trooper `0x001206FD` as in prototype). Player appearance is not synced in v1 — only equipped items differentiate players visually.
 - NPC is **renamed** to the player's display name (as entered on first server connect)
 - Client maintains `NetEntityId → TESObjectREFR*` mapping
@@ -390,8 +394,12 @@ name=PlayerOne
 All connected players are effectively companions to each other:
 
 - When player A attacks an NPC, the NPC should also become hostile to players B, C, etc.
-- Implementation: add all player avatar NPCs to the **engine's existing companion faction**
-- This leverages the engine's existing faction hostility system — if player attacks an NPC, that NPC also becomes hostile to player's companions (which are the other player avatars)
+- Implementation: three commands on each spawned player avatar NPC:
+  1. `SetRestrained 1` — prevents autonomous movement (position driven by network data) while remaining visible to the AI system so hostile NPCs can target it
+  2. `AddToFaction playerFaction 1` — adds to the player's faction; leverages the engine's faction hostility system so aggro propagates to all player avatars
+  3. `SetPlayerTeammate 1` — NPC behaves as a combat teammate of the player for targeting/combat purposes
+- **Verified in-game**: hostile NPCs correctly target both the local player and restrained player-faction teammate NPCs
+- **Known limitation**: `SetRestrained` prevents death (companion unconscious behavior). Death handling requires temporarily clearing restrained state — see §7.3 note and v0.8 milestone.
 
 ---
 
@@ -733,7 +741,7 @@ No chat system in v1. Players communicate via external tools (Discord, etc.).
 - [ ] Client: sample local player position/rotation/movement each tick
 - [ ] Client: send PlayerSnapshot at 20 Hz
 - [ ] Server: relay snapshots to other connected clients
-- [ ] Client: spawn remote player avatar NPCs (AI-disabled, named, companion faction)
+- [ ] Client: spawn remote player avatar NPCs (restrained, playerFaction, teammate, named)
 - [ ] Client: interpolation buffer + lerp positioning
 - [ ] Client: basic animation sync (idle, walk, weapon stance)
 
@@ -789,7 +797,7 @@ No chat system in v1. Players communicate via external tools (Discord, etc.).
 | 5 | Token storage location | File in `Data/NVSE/Plugins/fnvmp/` |
 | 6 | Connection info passing | File (`fnvmp_connect.cfg`) |
 | 7 | Player avatar base form | Single generic (NCR trooper), equipment-only differentiation |
-| 8 | Faction mechanism | Engine's existing companion faction |
+| 8 | Faction mechanism | `SetRestrained 1` + `AddToFaction playerFaction 1` + `SetPlayerTeammate 1` |
 | 9 | Corpse loot sync | No sync; corpse has inventory locally but removing items is not synced |
 | 10 | NPC weapon anim sync | Position/rotation only; no explicit firing animation sync |
 | 11 | Max player count (v1) | 8 |

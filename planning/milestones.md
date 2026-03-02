@@ -65,8 +65,10 @@
 **Scope**:
 - Server packs stored snapshots into `WorldSnapshot`, broadcasts to all **other** connected clients at 20 Hz
 - On first `WorldSnapshot` containing an unknown `NetEntityId`: spawn NPC via `PlaceAtMe` using hardcoded base form (`0x001206FD` — NCR trooper)
-- Disable AI on spawned NPC (existing prototype pattern)
-- Add NPC to companion faction
+- Configure spawned NPC as a restrained teammate:
+  1. `SetRestrained 1` — prevents autonomous movement; position driven by network data. NPC remains visible to AI (targetable by hostile NPCs)
+  2. `AddToFaction playerFaction 1` — faction hostility propagates to all player avatars
+  3. `SetPlayerTeammate 1` — NPC treated as player's combat teammate
 - Maintain `NetEntityId → TESObjectREFR*` map (entity manager)
 - Each tick: set NPC position/rotation directly from **latest** received snapshot (no interpolation — simple teleport)
 - On `PlayerDisconnect` event (or timeout): despawn (disable + mark for delete) the remote NPC
@@ -209,6 +211,7 @@
 - NPC death: zone owner detects HP ≤ 0, executes `Kill` locally, sends `DeathEvent`
 - Server broadcasts `DeathEvent` → all clients apply `Kill` on their local copy
 - Player damage: same flow but player avatar NPC is the target
+- **Player avatar death handling**: `SetRestrained` prevents normal death (companion unconscious behavior). To kill a player avatar: temporarily `SetRestrained 0`, apply `Kill`, then clean up. Exact mechanism TBD during implementation.
 - No respawn yet (dead = dead until next milestone)
 
 **Hardcoded**: sanity check thresholds (distance, rate)
