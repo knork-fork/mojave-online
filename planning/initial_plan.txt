@@ -1,0 +1,258 @@
+What we'll need in the first version:
+
+a) server
+- completely new logic as game itself was never intended to be multiplayer ready, so we need netcode and multiplayer logic from scratch (everything from interpolation to receiving and serving data)
+- player data (health, location, equipment, stats, quest status, xp...) should be stored on the server (database? json? to be decided.)
+- needs to serve "savegames" to clients which are filled with stored player data
+ - game was never intended to join a server, so a "fake" savegame needs to be created with current player state (health, location, equipment...)
+- built as server.exe
+ - does not start the actual game, it only receives and sends data and communicates with whatever storage was defined (database/json/etc)
+
+b) client
+- client needs a way to "authenticate" with the server (not necesarily in literal sense, i.e. via username/password, but by some unique computer ID?) to receieve a savegame that the game can load, and also to be able to send data
+- players are spawned as AI-disabled NPCs in other players' games
+ - position, rotation, animations, equipment etc. are all received from the server
+ - player's position, rotation, animations, equipment etc. are sent to the server
+- all players are "single faction", i.e. if player enters combat with an NPC, NPC will attack all players at the same time
+ - can other players be flagged as "companions" inside others games? this will then be in-engine solution for NPC aggro.
+- first player to enter cell is designated as cell owner
+ - cell owner's game is in charge of spawning NPCs
+ - cell owner sends non-player NPC (so ignoring player NPCs) position, rotation, animations etc. to server, all others receive update
+ - if cell owner leaves the cell or disconnects, new player is designated as cell owner
+  - this shouldn't cause local actor desync - new cell owner should already have NPC status from their last update from old cell owner
+  - this can cause global actor desync - named NPCs who already entered specific cells (for example when they get disappeared from the game due to quests) can now spawn where they shouldn't by game rules; this is acceptable, this project was never meant for lore-accurate playthrough
+- built as fnvmp.dll and join_server.exe
+ - fnvmp.dll should exit if missing args from join_server.exe
+ - join_server.exe is a simple app containing an input box for IP address, when IP address of a computer that's running a server (can also be localhost) is input then the game is launched normally
+  - by "game launched normally" I mean however nvmp_launcher.exe from NV: Multiplayer (https://nv-mp.com/) handles it
+- update logic
+ - every game tick client plugin should update position/rotation/animation/equipment for all NPCs (player and non-player) in the current cell
+  - cache expensive updates such as equipment, as it's not needed to update inventory of each player every game tick
+   - maybe equipment doesn't even need to be updated until the player dies and a body is left?
+  - this happens independent of receiving updates from the server, as it's important to anchor player position due to animation groups (like e.g. forward) moving the NPC when set
+ - plugin should have internal storage for all tracked (multiplayer) objects (NPCs only - for now don't keep track of ingame objects, loot, and containers other than bodies) which is then updated when receiving an update from the server
+- if a player dies, it should be configurable whether he respawns (and where) with their equipment intact or the equipment gets left on their body
+ - player's body should persist for configurable amount of time
+ - in any case, player should respawn as a brand new NPC while his previous avatar remains a corpse
+ - player's body data (inventory, position, location, but maybe not full ragdoll positions?) should also be spawned for player themself if they re-enter area where they died
+
+Once again, the game was NEVER meant to be played in multiplayer so priorities are stability and performance.
+Topics like anti-cheat are not the priority (game will mostly be played by friends in co-op anyway).
+
+----
+
+Below are some details from the above reworked because I didn't want to edit what I wrote originally:
+
+1) Base save + bootstrap approach
+Make player finish Doc Mitchel's intro (player creation, SPECIAL setting etc.) and then when player exits Doc's house a savegame is made and marked as entrypoint for that specific server that was joined. This way all players start with same base savegame and server doesn't need to handle savegame creation or even store player's savegames.
+Server would then provide scripts to bootstrap the player into the correct cell and with correct equipment (possibly while displaying some "fake" loading screen UI overlayed on top of the player's display?).
+This also means that player doesn't technically join the server until he finished the intro, which is great as it removes the possibility of other players interacting with the player and thus corrupting their basegame save.
+
+2) Identity and tokens
+Server issues a random token on first connect and client stores it.
+On future connects client presents token and server loads persistent state (bootstraping after player loads a base savegame).
+
+3) Animation scope
+For v1, only the basic animations are needed for player NPCs - walking, running (if running mod present, obviously), holstered/unholstered stance, firing/attacking, reloading, possibly aiming. No jumping, finetuned rotation etc. for now (we want stability, it doesn't have to be perfect).
+For non-player NPCs maybe there's an in-engine solution for marking what player is the NPC targeting (decided by cell owner) so only basic position/rotation needs updating rather than trying to mock full animation state.
+
+4) “Single faction” clarified
+Co-op companion model - players are basically companions to each other. In vanilla, if player attacks an NPC, that NPC will also attack player's companion which is what I want to happen with players too.
+
+5) NPC identity and mapping
+Server assigns:
+- uint32 NetEntityId
+
+When cell owner spawns an NPC:
+- Owner sends:
+ - BaseFormID
+ - Spawn position
+ - Rotation
+ - IsPersistent flag
+- Server assigns NetEntityId
+- Server broadcasts spawn with NetEntityId
+- Each client maps: NetEntityId → local TESObjectREFR*
+
+e.g. damage messages use NetEntityId.
+
+If named NPCs exist in that cell already use FormID + CellID as identity key.
+Server still wraps them in NetEntityId.
+
+Leveled lists & respawns:
+- Zone owner spawns NPC normally (engine decides leveled variant).
+- Owner reports: BaseFormID resolved, Final stats if needed
+- Other clients spawn exact same BaseFormID manually.
+- Ignore engine’s leveled resolution on non-owners (health and stats need to be carried over from owner).
+
+Respawn rules:
+- If cell unloaded everywhere → forget NPC list
+- When new owner loads cell → fresh vanilla spawns
+- No long-term world persistence
+
+6) Authority model
+Host-authoritative per-zone model
+
+Define:
+System	Authority
+Player movement	Each player
+Player damage	Server applies
+NPC AI	Zone owner
+NPC spawn	Zone owner
+NPC death	Zone owner
+Inventory drops	Zone owner
+Persistence	Server
+
+This must be written exactly like this in spec.
+
+
+7) Networking
+
+Transport - UDP
+
+Reliability model:
+- Unreliable (movement snapshots)
+- Reliable ordered (events)
+
+Library suggestion to evaluate:
+- ENet (chatgpt says recommended)
+- Custom UDP + simple reliability layer
+
+Tick rates:
+- Client send rate: 20–30 Hz
+- Snapshot broadcast: 20 Hz
+- Server tick: 30 Hz
+
+Interpolation buffer: 100-150ms
+- Client stores last 2–3 snapshots
+- Renders position at (currentTime - 100ms)
+- Smoothly interpolates between known states
+
+8) Snapshot vs Event
+
+Snapshot (unreliable):
+Position
+Rotation
+Movement state
+Weapon ID
+
+Events (reliable):
+Spawn NPC
+Despawn NPC
+Damage applied
+Equip change
+Death
+Corpse spawn
+Cell ownership transfer
+
+9) Combat + damage flow
+
+Flow:
+- Client detects hit.
+- Sends HitEvent(NetEntityId, damage, weapon).
+- Server:
+ - Validates basic sanity (distance, rate).
+ - Subtracts health in authoritative state.
+ - Broadcasts HealthUpdate.
+- Cell owner:
+ - If health <= 0:
+  - Executes kill locally.
+  - Sends DeathEvent.
+- Server broadcasts DeathEvent.
+- Others apply kill locally.
+
+This ensures:
+- Server owns health.
+- Cell owner owns death execution (ragdoll etc.).
+
+10) Persistence scope
+
+Persist per player:
+Token ID
+Name
+Level
+Current HP/AP
+Current location (worldspace + cell + pos/rot)
+Inventory (FormID + count)
+Equipped items
+
+Do NOT persist:
+Quest states
+Faction reputation
+Cleared areas
+Container contents
+World modifications
+
+When no players in zone:
+NPCs forgotten.
+Corpses forgotten.
+
+World resets naturally.
+
+11) Cell / exterior grid formalization
+
+Instead of “current cell owner”, define:
+
+Zone = loaded exterior grid centered on player (e.g., 3x3 cell cluster).
+
+Ownership:
+
+First player entering a zone becomes ZoneOwner.
+Ownership tracked per zone key (WorldspaceID + grid coords).
+If owner leaves:
+- Wait 5 seconds.
+- Promote next player in zone.
+
+If no players remain:
+- Zone deleted.
+
+This solves exterior streaming problem.
+
+Note: this text intermixes "cell owner" and "zone owner".
+
+12) Crash containment
+A separate process can keep communication with server and if the game ever crashes it could inform the server of that. If disconnect happens, server could check if it didn't receive pings for 5 seconds and then promote another player to cell owner instead (or if no players present, simply forget about that cell and flush NPC list).
+NPC freeze for a few seconds while server looks for a new owner is acceptable for co-op.
+
+13) Corpse handling
+Ignore ragdoll sync.
+Zone owner triggers Kill(), each client engine handles ragdoll in-game naturally.
+No corpse inventory sync.
+Loot is local only (corpses and containers), not synced.
+
+14) Reframed “update logic” section
+
+Local Sampling
+Each client:
+- Samples local player state every game tick.
+- Maintains LocalPlayerState cache.
+
+Network Send (20–30 Hz)
+Client sends snapshot:
+- Position (quantized)
+- Yaw rotation
+- MovementState enum
+- CurrentWeapon FormID
+
+Snapshot Receive
+Client:
+- Stores incoming snapshots in interpolation buffer (~100ms).
+- Renders remote players using interpolated state.
+
+NPC Handling
+Zone owner:
+- Runs vanilla AI.
+- Every 20 Hz sends NPC snapshot: (NetEntityId, Position, Rotation, MovementState)
+
+Non-owners:
+Apply snapshot directly.
+AI disabled locally.
+
+Events (Reliable)
+
+Triggered only on change:
+Spawn NPC
+Despawn NPC
+Equip change
+Hit
+Death
+Ownership transfer
