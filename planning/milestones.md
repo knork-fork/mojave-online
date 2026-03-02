@@ -42,7 +42,7 @@
 **Scope**:
 - Client samples local player `posX, posY, posZ, rotZ` every game tick
 - Client sends `PlayerSnapshot` at **20 Hz** (pos + rot only; `movementState` hardcoded to `Idle`, `weaponFormId = 0`, `actionState = None`)
-- Server receives `PlayerSnapshot`, logs position to stdout
+- Server receives `PlayerSnapshot`, logs position to stdout (behind `--verbose` flag; off by default to avoid spam in later milestones)
 - Server stores latest snapshot per connected player (in memory)
 - Sequence numbers added to packet header (`uint16_t`)
 
