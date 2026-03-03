@@ -355,6 +355,7 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="net\net_client.cpp" />
     <ClCompile Include="game\entity_manager.cpp" />
+    <ClCompile Include="game\interpolation.cpp" />
     <ClCompile Include="enet\callbacks.c">
       <ForcedIncludeFiles Condition="'$(Configuration)|$(Platform)'=='Debug ng|Win32'" />
       <ForcedIncludeFiles Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" />
@@ -448,6 +449,7 @@
     <ClInclude Include="shared\protocol.h" />
     <ClInclude Include="net\net_client.h" />
     <ClInclude Include="game\entity_manager.h" />
+    <ClInclude Include="game\interpolation.h" />
     <ClInclude Include="enet\include\enet\enet.h" />
   </ItemGroup>
   <ItemGroup>

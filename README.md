@@ -6,7 +6,7 @@ This is a co-op mod for friends — anti-cheat is explicitly out of scope. The d
 
 ## Status
 
-Early development. Milestones v0.1–v0.3 are complete (networking, player snapshots, remote player avatars). See [planning/milestones.md](planning/milestones.md) for the full roadmap.
+Early development. Milestones v0.1–v0.4 are complete (networking, player snapshots, remote player avatars). See [planning/milestones.md](planning/milestones.md) for the full roadmap.
 
 ## How it works
 

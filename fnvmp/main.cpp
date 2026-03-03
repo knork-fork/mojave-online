@@ -27,6 +27,7 @@ static ExpressionEvaluatorUtils g_expEvalUtils{};
 // Timing
 static LARGE_INTEGER g_freq{};
 static LARGE_INTEGER g_last{};
+static double g_gameTime = 0.0;  // monotonic cumulative clock (seconds)
 
 // Networking
 static NetClient g_netClient;
@@ -104,6 +105,7 @@ static void MessageHandler(NVSEMessagingInterface::Message* msg)
 
 	const double dt = double(now.QuadPart - g_last.QuadPart) / double(g_freq.QuadPart);
 	g_last = now;
+	g_gameTime += dt;
 
 	// Poll network every tick
 	g_netClient.Poll(dt);
@@ -124,13 +126,13 @@ static void MessageHandler(NVSEMessagingInterface::Message* msg)
 		const auto& entities = g_netClient.GetWorldEntities();
 		if (!entities.empty())
 		{
-			EntityManager_UpdateFromWorldSnapshot(entities.data(), (uint16_t)entities.size());
+			EntityManager_UpdateFromWorldSnapshot(entities.data(), (uint16_t)entities.size(), g_gameTime);
 		}
 		g_netClient.ClearWorldSnapshot();
 	}
 
-	// Execute pending entity operations (spawn, despawn, position update)
-	EntityManager_Tick();
+	// Execute pending entity operations (spawn, despawn, interpolated position update)
+	EntityManager_Tick(g_gameTime);
 
 	// Send player snapshot at 20 Hz (only when a savegame is loaded)
 	if (g_netClient.IsConnected() && g_thePlayer && *g_thePlayer

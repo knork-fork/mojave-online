@@ -1,4 +1,5 @@
 #include "entity_manager.h"
+#include "interpolation.h"
 #include "protocol.h"
 
 #include "nvse/PluginAPI.h"
@@ -18,11 +19,12 @@ struct RemoteEntity {
     uint32_t netEntityId = 0;
     UInt32   refID       = 0;    // TESObjectREFR refID (0 = not yet spawned)
     bool     spawned     = false;
-    bool     dirty       = false;
 
     uint32_t cellId      = 0;
-    float    posX = 0, posY = 0, posZ = 0;
-    float    rotZ = 0;
+    // Position/rotation are now in the interpolation buffer, but we keep a copy
+    // for initial spawn placement (before interpolation has enough data).
+    float    spawnPosX = 0, spawnPosY = 0, spawnPosZ = 0;
+    float    spawnRotZ = 0;
     uint8_t  movementState = 0;
     uint32_t weaponFormId  = 0;
     uint8_t  actionState   = 0;
@@ -97,7 +99,7 @@ void EntityManager_Init(NVSEScriptInterface* script, NVSEConsoleInterface* conso
     }
 }
 
-void EntityManager_UpdateFromWorldSnapshot(const EntityState* states, uint16_t count)
+void EntityManager_UpdateFromWorldSnapshot(const EntityState* states, uint16_t count, double snapshotTime)
 {
     // No savegame loaded yet — ignore snapshots entirely
     UInt32 localCellId = GetLocalPlayerCellID();
@@ -112,33 +114,30 @@ void EntityManager_UpdateFromWorldSnapshot(const EntityState* states, uint16_t c
             if (localCellId != 0 && es.cellId != localCellId) continue;
 
             RemoteEntity ent;
-            ent.netEntityId  = es.netEntityId;
-            ent.cellId       = es.cellId;
-            ent.posX         = es.posX;
-            ent.posY         = es.posY;
-            ent.posZ         = es.posZ;
-            ent.rotZ         = es.rotZ;
+            ent.netEntityId   = es.netEntityId;
+            ent.cellId        = es.cellId;
+            ent.spawnPosX     = es.posX;
+            ent.spawnPosY     = es.posY;
+            ent.spawnPosZ     = es.posZ;
+            ent.spawnRotZ     = es.rotZ;
             ent.movementState = es.movementState;
             ent.weaponFormId  = es.weaponFormId;
             ent.actionState   = es.actionState;
-            ent.dirty         = true;
 
             g_entities[es.netEntityId] = ent;
             g_pendingSpawns.push_back(es.netEntityId);
             _MESSAGE("EntityManager: new remote entity %u queued for spawn", es.netEntityId);
         } else {
-            // Existing entity — update state
+            // Existing entity — update non-positional state
             RemoteEntity& ent = it->second;
             ent.cellId        = es.cellId;
-            ent.posX          = es.posX;
-            ent.posY          = es.posY;
-            ent.posZ          = es.posZ;
-            ent.rotZ          = es.rotZ;
             ent.movementState = es.movementState;
             ent.weaponFormId  = es.weaponFormId;
             ent.actionState   = es.actionState;
-            ent.dirty         = true;
         }
+
+        // Push position into interpolation buffer (for both new and existing entities)
+        Interp_PushSnapshot(es.netEntityId, es.posX, es.posY, es.posZ, es.rotZ, snapshotTime);
     }
 }
 
@@ -147,30 +146,26 @@ void EntityManager_RemoveEntity(uint32_t netEntityId)
     auto it = g_entities.find(netEntityId);
     if (it != g_entities.end()) {
         g_pendingDespawns.push_back(netEntityId);
+        Interp_RemoveEntity(netEntityId);
         _MESSAGE("EntityManager: entity %u queued for despawn", netEntityId);
     }
 }
 
-void EntityManager_Tick()
+void EntityManager_Tick(double currentTime)
 {
     if (!s_script || !s_console) return;
     if (!g_thePlayer || !*g_thePlayer) return;
 
-    bool hasPendingWork = !g_pendingSpawns.empty() || !g_pendingDespawns.empty();
-
-    // Check for dirty entities if no other pending work
-    if (!hasPendingWork) {
-        for (auto& kv : g_entities) {
-            if (kv.second.spawned && kv.second.dirty) {
-                hasPendingWork = true;
-                break;
-            }
-        }
+    bool hasSpawnedEntities = false;
+    for (auto& kv : g_entities) {
+        if (kv.second.spawned) { hasSpawnedEntities = true; break; }
     }
 
+    bool hasPendingWork = !g_pendingSpawns.empty() || !g_pendingDespawns.empty() || hasSpawnedEntities;
     if (!hasPendingWork) return;
 
     UInt32 localCellId = GetLocalPlayerCellID();
+    double renderTime = currentTime - INTERP_DELAY;
 
     // Suppress console for all engine operations this tick
     SuppressConsole();
@@ -234,26 +229,30 @@ void EntityManager_Tick()
         s_console->RunScriptLine2("AddToFaction 0001B2A4 1", placedRefr, true);
         s_console->RunScriptLine2("SetPlayerTeammate 1", placedRefr, true);
 
-        // Set initial position
+        // Set initial position from spawn data
         char buf[256];
         sprintf_s(buf, sizeof(buf),
             "SetPos X %.2f\nSetPos Y %.2f\nSetPos Z %.2f\nSetAngle Z %.2f",
-            ent.posX, ent.posY, ent.posZ, ent.rotZ * RAD_TO_DEG);
+            ent.spawnPosX, ent.spawnPosY, ent.spawnPosZ, ent.spawnRotZ * RAD_TO_DEG);
         s_console->RunScriptLine2(buf, placedRefr, true);
 
-        ent.dirty = false;
         _MESSAGE("EntityManager: spawned entity %u as ref %08X at (%.1f, %.1f, %.1f)",
-                 id, ent.refID, ent.posX, ent.posY, ent.posZ);
+                 id, ent.refID, ent.spawnPosX, ent.spawnPosY, ent.spawnPosZ);
     }
     g_pendingSpawns.clear();
 
-    // --- Update dirty entities ---
+    // --- Update all spawned entities via interpolation ---
     for (auto& kv : g_entities) {
         RemoteEntity& ent = kv.second;
-        if (!ent.spawned || !ent.dirty) continue;
+        if (!ent.spawned) continue;
 
         // Skip position updates for entities in a different cell
         if (localCellId != 0 && ent.cellId != localCellId) continue;
+
+        float interpX, interpY, interpZ, interpRotZ;
+        if (!Interp_GetState(ent.netEntityId, renderTime, currentTime,
+                             interpX, interpY, interpZ, interpRotZ))
+            continue;
 
         TESObjectREFR* npc = ResolveRefr(ent.refID);
         if (!npc) {
@@ -265,10 +264,8 @@ void EntityManager_Tick()
         char buf[256];
         sprintf_s(buf, sizeof(buf),
             "SetPos X %.2f\nSetPos Y %.2f\nSetPos Z %.2f\nSetAngle Z %.2f",
-            ent.posX, ent.posY, ent.posZ, ent.rotZ * RAD_TO_DEG);
+            interpX, interpY, interpZ, interpRotZ * RAD_TO_DEG);
         s_console->RunScriptLine2(buf, npc, true);
-
-        ent.dirty = false;
     }
 
     RestoreConsole();
@@ -280,6 +277,7 @@ void EntityManager_Shutdown()
         g_entities.clear();
         g_pendingSpawns.clear();
         g_pendingDespawns.clear();
+        Interp_Clear();
         return;
     }
 
@@ -299,6 +297,7 @@ void EntityManager_Shutdown()
     g_entities.clear();
     g_pendingSpawns.clear();
     g_pendingDespawns.clear();
+    Interp_Clear();
 
     _MESSAGE("EntityManager: shutdown complete");
 }

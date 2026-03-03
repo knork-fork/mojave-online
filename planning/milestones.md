@@ -86,7 +86,7 @@
 
 ---
 
-## v0.4 — Interpolation
+## v0.4 — Interpolation (Completed)
 
 **Goal**: Remote player NPC moves smoothly instead of teleporting between snapshots.
 
