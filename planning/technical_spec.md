@@ -394,12 +394,14 @@ name=PlayerOne
 All connected players are effectively companions to each other:
 
 - When player A attacks an NPC, the NPC should also become hostile to players B, C, etc.
-- Implementation: three commands on each spawned player avatar NPC:
+- Implementation: four commands on each spawned player avatar NPC:
   1. `SetRestrained 1` — prevents autonomous movement (position driven by network data) while remaining visible to the AI system so hostile NPCs can target it
-  2. `AddToFaction playerFaction 1` — adds to the player's faction; leverages the engine's faction hostility system so aggro propagates to all player avatars
-  3. `SetPlayerTeammate 1` — NPC behaves as a combat teammate of the player for targeting/combat purposes
+  2. `SetCombatDisabled 1` — prevents the NPC from initiating combat when `SetRestrained` is temporarily lifted to allow animations (weapon draw/holster)
+  3. `AddToFaction playerFaction 1` — adds to the player's faction; leverages the engine's faction hostility system so aggro propagates to all player avatars
+  4. `SetPlayerTeammate 1` — NPC behaves as a combat teammate of the player for targeting/combat purposes
 - **Verified in-game**: hostile NPCs correctly target both the local player and restrained player-faction teammate NPCs
 - **Known limitation**: `SetRestrained` prevents death (companion unconscious behavior). Death handling requires temporarily clearing restrained state — see §7.3 note and v0.8 milestone.
+- **Known limitation**: `SetRestrained` blocks many animations including weapon draw/holster. Any animation that requires the AI loop to process (weapon state changes, possibly others) will be silently ignored. The workaround is to temporarily drop `SetRestrained 0`, trigger the animation, then re-apply `SetRestrained 1` after the animation completes. `SetCombatDisabled 1` + per-tick `SetPos` mitigate the unrestrained window. See §10 research note for details.
 
 ---
 
@@ -424,8 +426,23 @@ Synced animations for player avatars, driven by two independent axes:
 
 | Animation | Trigger | Method |
 |-----------|---------|--------|
-| Drawing weapon | `weaponFormId` changed from 0 to non-zero | `ref.SetWeaponOut 1` (JIP) |
-| Holstering weapon | `weaponFormId` changed from non-zero to 0 | `ref.SetWeaponOut 0` (JIP) |
+| Drawing weapon | `weaponFormId` changed from 0 to non-zero | **TBD — see research note below** |
+| Holstering weapon | `weaponFormId` changed from non-zero to 0 | **TBD — see research note below** |
+
+> **Research note — SetRestrained blocks animations including weapon draw/holster**
+>
+> `SetRestrained 1` suppresses the AI loop, which blocks any animation that requires AI processing. This includes weapon draw/holster (`SetWeaponOut`) and potentially other animation state changes. The commands silently do nothing.
+>
+> **Attempted workarounds:**
+> 1. **`PlayGroup Equip 1`** — No effect in-game console.
+> 2. **`BaseProcess::SetWeaponOut(actor, bool)` virtual (vtable 0x116)** — Called directly from C++. Flips the `isWeaponOut` flag at `HighProcess+0x135` and triggers the stance, but the weapon mesh is not attached to the grip node. Weapon clips through actor, points skyward. Too low-level — skips the equip/attach logic.
+> 3. **Temporarily drop restrained (basic)** — `SetRestrained 0` → `SetWeaponOut 1` → fixed delay → `SetRestrained 1`. Animation plays correctly but AI acts during the window (movement/combat glitches).
+> 4. **Temporarily drop restrained (improved, current best)** — Same temporary unrestrain approach but with `SetAlert 1` to keep weapon unholstered and `SetCombatDisabled 1` on the NPC to prevent combat during the window:
+>    - **Draw**: `SetRestrained 0` → `SetWeaponOut 1` → `SetAlert 1` → poll until complete → `SetRestrained 1`
+>    - **Holster**: `SetRestrained 0` → `SetWeaponOut 0` → `SetAlert 0` → poll until complete → `SetRestrained 1`
+>    - Still janky with a fixed delay. Polling for animation/weapon-attach completion (e.g. checking `IsWeaponOut` or verifying the weapon node is attached to the grip) would be a significant improvement over a fixed timer.
+>
+> **Needs further research**: a clean method to trigger weapon draw/holster on a restrained actor, or a reliable polling mechanism to detect when the draw/holster animation is complete so restrained state can be re-applied immediately. Possible avenues: kNVSE `PlayAnimationPath`, `EquipItem`/`UnequipItem`, replacing `SetRestrained` with an alternative movement-lock, patching the engine's restrained check, JohnnyGuitar/ShowOff NVSE functions.
 
 **Upper-body actions** (from `ActionState`, layered on top of locomotion):
 
@@ -460,7 +477,7 @@ Two distinct layers:
 | Plugin state | Engine call | Notes |
 |---|---|---|
 | `MovementState` | `PlayGroup <AnimGroup>` | Every tick; idempotent, prevents engine reverting to idle |
-| `weaponFormId` | `ref.SetWeaponOut 1/0` (JIP) | Every tick; idempotent, engine handles draw/holster anim natively |
+| `weaponFormId` | **TBD** (see §10.1 research note) | `SetWeaponOut` blocked by `SetRestrained`; needs alternative approach |
 | `ActionState` (non-None) | `PlayGroup <ActionAnimGroup>` | Every tick; idempotent |
 | `ActionState` (None) | No action call | Engine stays in locomotion/aim stance |
 
@@ -847,7 +864,7 @@ Weapon draw/holster is tracked via `weaponFormId`, not `ActionState`.
 **Engine application** (applied every tick, all calls idempotent):
 
 1. **Locomotion**: `PlayGroup` from `MovementState` (`Forward`, `FastForward`, sneak variants, etc.)
-2. **Weapon**: `ref.SetWeaponOut 1` if `weaponFormId != 0`, else `ref.SetWeaponOut 0` (JIP)
+2. **Weapon**: **TBD** — `SetWeaponOut` blocked by `SetRestrained`; see §10.1 research note
 3. **Actions**: If `ActionState != None`, `PlayGroup` the action anim:
    - `Firing` → `AttackLeft` (0x1A)
    - `Reloading` → `ReloadA`+ (0xB1+, weapon-dependent)

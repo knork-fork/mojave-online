@@ -37,6 +37,24 @@ This is a **multiplayer mod** for Fallout: New Vegas. Spawned "NPCs" are actuall
 - **Per-tick position updates.** Avatar positions must be updated every game tick for smooth movement, interpolating between network updates.
 - **Hardcoded positions are temporary.** Current constants are placeholders; real data will come from the server.
 
+## SetRestrained animation workaround
+
+`SetRestrained 1` blocks many animations (weapon draw/holster, possibly others) because the AI loop that processes state changes is suppressed. **The workaround is to temporarily unrestrain the actor:**
+
+1. `SetRestrained 0` — drop the animation blocker
+2. Trigger the animation (e.g. `SetWeaponOut 1`, `SetAlert 1`)
+3. Wait/poll until the animation completes
+4. `SetRestrained 1` — re-apply
+
+`SetCombatDisabled 1` must also be set on the NPC (at spawn time) to prevent combat during unrestrained windows. Per-tick `SetPos` corrects any autonomous movement.
+
+**What does NOT work** for weapon draw on restrained actors:
+- `SetWeaponOut` while restrained — silently ignored
+- `PlayGroup Equip 1` — no effect
+- `BaseProcess::SetWeaponOut` virtual (C++ direct call) — flips flag but doesn't attach weapon mesh to grip node
+
+This pattern likely applies to any animation that requires AI loop processing, not just weapon draw/holster.
+
 ## NVSE API gotchas
 
 - **`RunScriptLine2` bSuppressConsoleOutput is broken.** The `ToggleConsoleOutput` calls in `GameScript.cpp:349,366` are commented out. The bool parameter does nothing.

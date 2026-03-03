@@ -226,6 +226,7 @@ void EntityManager_Tick(double currentTime)
 
         // Configure as restrained teammate
         s_console->RunScriptLine2("SetRestrained 1", placedRefr, true);
+        s_console->RunScriptLine2("SetCombatDisabled 1", placedRefr, true);
         s_console->RunScriptLine2("AddToFaction 0001B2A4 1", placedRefr, true);
         s_console->RunScriptLine2("SetPlayerTeammate 1", placedRefr, true);
 

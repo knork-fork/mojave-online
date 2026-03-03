@@ -109,6 +109,36 @@
 
 ---
 
+## v0.4.5 — Research: Weapon Draw/Holster on Restrained Actors
+
+**Goal**: Find a clean method to trigger weapon draw/holster animations on actors that have `SetRestrained 1`.
+
+**Problem**: `SetRestrained 1` (used to prevent autonomous NPC movement) blocks `SetWeaponOut` (JIP). The JIP command sets a desire flag via `Actor::SetWantsWeaponOut`, but the AI loop that acts on it is suppressed by the restrained state. The command silently does nothing.
+
+**Already attempted (all failed or inadequate)**:
+1. `PlayGroup Equip 1` — No effect in-game.
+2. `BaseProcess::SetWeaponOut` virtual (C++ direct call) — Flips the `isWeaponOut` flag but doesn't attach weapon mesh to grip node. Weapon clips through actor, pointing skyward.
+3. Temporarily dropping `SetRestrained 0` → `SetWeaponOut 1` → fixed delay → `SetRestrained 1` — Weapon draws correctly but requires timer-based delay and allows AI to act during the unrestrained window (janky movement/combat glitches).
+
+**Current best workaround (functional but janky)**:
+- Add `SetCombatDisabled 1` to NPC setup (prevents combat during unrestrained windows)
+- Draw: `SetRestrained 0` → `SetWeaponOut 1` → `SetAlert 1` → wait for completion → `SetRestrained 1`
+- Holster: `SetRestrained 0` → `SetWeaponOut 0` → `SetAlert 0` → wait for completion → `SetRestrained 1`
+- `SetAlert 1` forces the weapon to stay unholstered after draw
+- Using a fixed delay (seconds) works but is slow; polling until weapon-out state is stable / weapon node is attached would be much better
+
+**Avenues to explore for a cleaner solution**:
+- **Polling-based re-restrain**: check `IsWeaponOut` or verify weapon node attachment each tick, re-apply `SetRestrained 1` as soon as the animation completes (instead of fixed delay)
+- kNVSE `PlayAnimationPath` for direct animation playback of draw/holster sequences
+- `EquipItem`/`UnequipItem` to force-equip a weapon (may trigger draw animation as side effect)
+- Alternative movement-lock mechanisms to replace `SetRestrained` entirely (e.g., `SetSpeedMult 0`, `SetGhost`, custom AI package)
+- Patching the engine's restrained check for weapon draw specifically (find and NOP the branch)
+- JohnnyGuitar or ShowOff NVSE functions that may bypass the restriction
+
+**Test**: restrained NPC correctly plays weapon draw animation with weapon mesh properly attached to grip node, no visible jank or AI glitches during the transition.
+
+---
+
 ## v0.5 — Animation Sync
 
 **Goal**: Remote NPCs play correct locomotion and combat animations instead of sliding around in T-pose.
@@ -119,7 +149,7 @@
 - `ActionState` sampled (None, Firing, Reloading, Melee, AimingIS)
 - Receiving client applies every tick (all idempotent):
   - **Locomotion**: `PlayGroup` matching `MovementState`
-  - **Weapon**: `SetWeaponOut 1/0` (JIP LN) based on `weaponFormId`
+  - **Weapon**: method TBD (depends on v0.4.5 research outcome)
   - **Action**: `PlayGroup` for action anim if `ActionState != None`
   - **Idle stance**: `PlayGroup Aim` if weapon drawn + no action
 - Console output suppression via `SafeWrite8` on `Console::Print` (already proven in prototype)
