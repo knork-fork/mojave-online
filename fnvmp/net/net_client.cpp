@@ -150,6 +150,7 @@ void NetClient::HandleReceive(ENetEvent& event)
         m_netEntityId = ack.netEntityId;
         m_connected = true;
         m_heartbeatAccum = 0.0;
+        SendHeartbeat();  // immediate heartbeat so server resets timeout clock
         _MESSAGE("Connected, assigned NetEntityId %u", m_netEntityId);
         break;
     }

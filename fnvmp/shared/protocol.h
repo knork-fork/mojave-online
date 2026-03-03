@@ -101,7 +101,7 @@ struct MsgPlayerDisconnect {
 
 // Timing constants
 static constexpr double HEARTBEAT_INTERVAL = 2.0;  // seconds between client heartbeats
-static constexpr double HEARTBEAT_TIMEOUT  = 5.0;  // seconds before server considers client dead
+static constexpr double HEARTBEAT_TIMEOUT  = 10.0; // seconds before server considers client dead
 
 static constexpr uint16_t DEFAULT_PORT    = 7777;
 static constexpr size_t   MAX_PLAYERS     = 8;
