@@ -15,6 +15,8 @@ enum MessageType : uint8_t {
     MSG_WORLD_SNAPSHOT     = 5,   // server -> client (all other players' states)
     MSG_PLAYER_CONNECT     = 6,   // server -> all (new player joined, reliable)
     MSG_PLAYER_DISCONNECT  = 7,   // server -> all (player left, reliable)
+    MSG_PLAYER_FIRE        = 8,   // client -> server (reliable fire event)
+    MSG_REMOTE_FIRE        = 9,   // server -> client (relayed fire event)
 };
 
 enum MoveDirection : uint8_t {
@@ -34,7 +36,7 @@ enum MoveDirection : uint8_t {
 // Bitmask — multiple bits can be set simultaneously
 enum ActionState : uint8_t {
     ActionNone      = 0,
-    ActionFiring    = 1,
+    // bit 1 removed — fire events now sent as MSG_PLAYER_FIRE (reliable)
     ActionReloading = 2,
     ActionAimingIS  = 4,
 };
@@ -106,6 +108,16 @@ struct MsgPlayerDisconnect {
     uint32_t netEntityId;
 };
 
+struct MsgPlayerFire {
+    uint8_t  msgType;        // MSG_PLAYER_FIRE
+    uint32_t netEntityId;    // sender's ID
+};
+
+struct MsgRemoteFire {
+    uint8_t  msgType;        // MSG_REMOTE_FIRE
+    uint32_t netEntityId;    // who fired
+};
+
 #pragma pack(pop)
 
 // Timing constants
@@ -115,5 +127,5 @@ static constexpr double HEARTBEAT_TIMEOUT  = 10.0; // seconds before server cons
 static constexpr uint16_t DEFAULT_PORT    = 7777;
 static constexpr size_t   MAX_PLAYERS     = 8;
 
-static constexpr double SNAPSHOT_SEND_RATE     = 20.0;                   // snapshots per second
-static constexpr double SNAPSHOT_SEND_INTERVAL = 1.0 / SNAPSHOT_SEND_RATE;  // ~50ms
+static constexpr double SNAPSHOT_SEND_RATE     = 30.0;                   // snapshots per second
+static constexpr double SNAPSHOT_SEND_INTERVAL = 1.0 / SNAPSHOT_SEND_RATE;  // ~33ms

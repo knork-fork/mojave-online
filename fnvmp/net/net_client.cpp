@@ -82,6 +82,7 @@ void NetClient::Disconnect()
     m_hasNewWorldSnapshot = false;
     m_worldEntities.clear();
     m_disconnectedEntities.clear();
+    m_fireEvents.clear();
 
     _MESSAGE("NetClient: disconnected");
 }
@@ -209,6 +210,17 @@ void NetClient::HandleReceive(ENetEvent& event)
         break;
     }
 
+    case MSG_REMOTE_FIRE: {
+        if (event.packet->dataLength < sizeof(MsgRemoteFire)) {
+            _MESSAGE("NetClient: RemoteFire too short");
+            break;
+        }
+        MsgRemoteFire msg;
+        std::memcpy(&msg, event.packet->data, sizeof(msg));
+        m_fireEvents.push_back(msg.netEntityId);
+        break;
+    }
+
     default:
         _MESSAGE("NetClient: unknown message type %u", msgType);
         break;
@@ -236,5 +248,22 @@ std::vector<uint32_t> NetClient::TakeDisconnectEvents()
 {
     std::vector<uint32_t> result;
     result.swap(m_disconnectedEntities);
+    return result;
+}
+
+void NetClient::SendFireEvent(uint32_t netEntityId)
+{
+    if (!m_connected) return;
+
+    MsgPlayerFire msg;
+    msg.msgType = MSG_PLAYER_FIRE;
+    msg.netEntityId = netEntityId;
+    Send(&msg, sizeof(msg), CHANNEL_GAME_EVENTS, true);
+}
+
+std::vector<uint32_t> NetClient::TakeFireEvents()
+{
+    std::vector<uint32_t> result;
+    result.swap(m_fireEvents);
     return result;
 }

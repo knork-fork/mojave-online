@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // Interpolation constants
-static constexpr double INTERP_DELAY    = 0.100;  // 100ms render delay
+static constexpr double INTERP_DELAY    = 0.075;  // 75ms render delay
 static constexpr double EXTRAP_TIMEOUT  = 0.500;  // 500ms before freezing
 
 // Push a new position/rotation sample for an entity.

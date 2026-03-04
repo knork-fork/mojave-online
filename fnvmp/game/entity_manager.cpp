@@ -153,6 +153,22 @@ void EntityManager_UpdateFromWorldSnapshot(const EntityState* states, uint16_t c
     }
 }
 
+void EntityManager_ApplyFireEvent(uint32_t netEntityId, double currentTime)
+{
+    auto it = g_entities.find(netEntityId);
+    if (it == g_entities.end()) return;
+
+    RemoteEntity& ent = it->second;
+    if (!ent.spawned) return;
+
+    TESObjectREFR* npc = ResolveRefr(ent.refID);
+    if (!npc) return;
+
+    SuppressConsole();
+    Animation_ApplyFire(npc, currentTime, ent.animState);
+    RestoreConsole();
+}
+
 void EntityManager_RemoveEntity(uint32_t netEntityId)
 {
     auto it = g_entities.find(netEntityId);

@@ -15,8 +15,9 @@ static NVSEScriptInterface*  s_script  = nullptr;
 static NVSEConsoleInterface* s_console = nullptr;
 
 // Compiled polling expressions
-static Script* s_exprIsWeaponOut       = nullptr;
+static Script* s_exprIsWeaponOut       = nullptr;  // fallback for weapon state correction
 static Script* s_exprIsSneaking        = nullptr;
+static Script* s_exprGetAnimAction     = nullptr;  // weapon draw/holster completion detection
 static Script* s_exprGetEquippedWeaponType = nullptr;  // ShowOff NVSE
 
 static constexpr double UNRESTRAIN_TIMEOUT  = 2.0;  // seconds
@@ -135,9 +136,8 @@ static void ApplySneak(TESObjectREFR* npc, uint8_t isSneaking, double currentTim
 
 // --------------------------------------------------
 // Weapon draw / holster
-// Uses actual NPC state (IsWeaponOut poll) as source of truth,
-// never relies on cached prev state. This makes it self-correcting
-// even under rapid draw/holster transitions.
+// Uses tracked npcWeaponOut state with IsWeaponOut fallback.
+// Fallback handles: late join, cell transitions, missed transitions.
 // --------------------------------------------------
 
 static void ApplyWeapon(TESObjectREFR* npc, uint8_t netIsWeaponOut, double currentTime, EntityAnimState& st)
@@ -145,13 +145,23 @@ static void ApplyWeapon(TESObjectREFR* npc, uint8_t netIsWeaponOut, double curre
     // If a weapon operation is already pending, let PollUnrestrain handle it
     if (st.pendingOps & (PENDING_WEAPON_DRAW | PENDING_WEAPON_HOLSTER)) return;
 
-    // Poll actual NPC weapon state
-    bool actualWeaponOut = (PollNumber(s_exprIsWeaponOut, npc) >= 1.0);
+    // IsWeaponOut fallback: correct tracked state from ground truth
+    if (s_exprIsWeaponOut) {
+        bool actual = (PollNumber(s_exprIsWeaponOut, npc) >= 1.0);
+        if (actual != st.npcWeaponOut) {
+            st.npcWeaponOut = actual;
+            // Also refresh weapon type if NPC has weapon drawn
+            if (actual && s_exprGetEquippedWeaponType) {
+                st.cachedWeaponType = (int)PollNumber(s_exprGetEquippedWeaponType, npc);
+            }
+        }
+    }
+
     bool desiredWeaponOut = (netIsWeaponOut != 0);
 
-    if (actualWeaponOut == desiredWeaponOut) return;  // already in sync
+    if (st.npcWeaponOut == desiredWeaponOut) return;  // already in sync
 
-    if (desiredWeaponOut && !actualWeaponOut) {
+    if (desiredWeaponOut && !st.npcWeaponOut) {
         // Draw weapon
         if (!st.isUnrestrained) {
             RunCmd(npc, "SetRestrained 0");
@@ -160,8 +170,9 @@ static void ApplyWeapon(TESObjectREFR* npc, uint8_t netIsWeaponOut, double curre
         }
         RunCmd(npc, "SetWeaponOut 1\nSetAlert 1");
         st.pendingOps |= PENDING_WEAPON_DRAW;
+        st.weaponAnimSeen = false;
         st.cachedWeaponType = -1;
-    } else if (!desiredWeaponOut && actualWeaponOut) {
+    } else if (!desiredWeaponOut && st.npcWeaponOut) {
         // Holster weapon
         if (!st.isUnrestrained) {
             RunCmd(npc, "SetRestrained 0");
@@ -170,6 +181,7 @@ static void ApplyWeapon(TESObjectREFR* npc, uint8_t netIsWeaponOut, double curre
         }
         RunCmd(npc, "SetWeaponOut 0\nSetAlert 0");
         st.pendingOps |= PENDING_WEAPON_HOLSTER;
+        st.weaponAnimSeen = false;
         st.cachedWeaponType = -1;
     }
 }
@@ -192,10 +204,15 @@ static void PollUnrestrain(TESObjectREFR* npc, double currentTime, EntityAnimSta
     }
 
     if (st.pendingOps & PENDING_WEAPON_DRAW) {
-        double val = PollNumber(s_exprIsWeaponOut, npc);
-        if (val >= 1.0) {
+        int animAction = s_exprGetAnimAction ? (int)PollNumber(s_exprGetAnimAction, npc) : -1;
+        if (animAction == 0) {
+            st.weaponAnimSeen = true;  // equip animation in progress
+        }
+        if (st.weaponAnimSeen && animAction != 0) {
+            // Equip animation finished
             st.pendingOps &= ~PENDING_WEAPON_DRAW;
-            // Classify weapon type
+            st.weaponAnimSeen = false;
+            st.npcWeaponOut = true;
             if (s_exprGetEquippedWeaponType) {
                 st.cachedWeaponType = (int)PollNumber(s_exprGetEquippedWeaponType, npc);
             }
@@ -203,9 +220,15 @@ static void PollUnrestrain(TESObjectREFR* npc, double currentTime, EntityAnimSta
     }
 
     if (st.pendingOps & PENDING_WEAPON_HOLSTER) {
-        double val = PollNumber(s_exprIsWeaponOut, npc);
-        if (val < 1.0) {
+        int animAction = s_exprGetAnimAction ? (int)PollNumber(s_exprGetAnimAction, npc) : -1;
+        if (animAction == 1) {
+            st.weaponAnimSeen = true;  // unequip animation in progress
+        }
+        if (st.weaponAnimSeen && animAction != 1) {
+            // Unequip animation finished
             st.pendingOps &= ~PENDING_WEAPON_HOLSTER;
+            st.weaponAnimSeen = false;
+            st.npcWeaponOut = false;
         }
     }
 
@@ -234,7 +257,7 @@ static void PollUnrestrain(TESObjectREFR* npc, double currentTime, EntityAnimSta
 }
 
 // --------------------------------------------------
-// Upper-body actions (firing, reloading, aiming)
+// Upper-body actions (reloading, aiming — firing handled by Animation_ApplyFire)
 // --------------------------------------------------
 
 static void ApplyActions(TESObjectREFR* npc, uint8_t actionState, uint8_t isWeaponOut,
@@ -253,39 +276,11 @@ static void ApplyActions(TESObjectREFR* npc, uint8_t actionState, uint8_t isWeap
 
     if (!stateChanged) return;
 
-    bool firing   = (actionState & ActionFiring) != 0;
-    bool reloading= (actionState & ActionReloading) != 0;
-    bool aimingIS = (actionState & ActionAimingIS) != 0;
+    bool reloading = (actionState & ActionReloading) != 0;
+    bool aimingIS  = (actionState & ActionAimingIS) != 0;
 
     if (reloading) {
         RunCmd(npc, "PlayGroup ReloadA 1");
-        return;
-    }
-
-    if (firing) {
-        int wtype = st.cachedWeaponType;
-
-        if (wtype >= 3 && wtype <= 9) {
-            // Ranged weapon
-            if (aimingIS) {
-                RunCmd(npc, "PlayGroup AttackLeftIS 1\nPlayGroup AimIS 0");
-            } else {
-                RunCmd(npc, "PlayGroup AttackLeft 1");
-            }
-            // Weapon sound
-            RunCmd(npc, "PlaySound3D (GetWeaponSound (GetEquippedWeapon) 0)");
-        } else if (wtype >= 0 && wtype <= 2) {
-            // Melee weapon
-            RunCmd(npc, "PlayGroup AttackRight 1");
-            st.attackAnimEndTime = currentTime + MELEE_ANIM_DURATION;
-        } else if (wtype >= 10 && wtype <= 13) {
-            // Thrown weapon
-            RunCmd(npc, "PlayGroup AttackThrow6 1");
-            st.attackAnimEndTime = currentTime + THROWN_ANIM_DURATION;
-        } else {
-            // Unknown weapon type, fallback to generic attack
-            RunCmd(npc, "PlayGroup AttackLeft 1");
-        }
         return;
     }
 
@@ -325,14 +320,48 @@ void Animation_Init(NVSEScriptInterface* script, NVSEConsoleInterface* console)
         _MESSAGE("Animation_Init: WARNING — failed to compile IsSneaking");
     }
 
+    s_exprGetAnimAction = s_script->CompileExpression("GetAnimAction");
+    if (!s_exprGetAnimAction) {
+        _MESSAGE("Animation_Init: WARNING — failed to compile GetAnimAction");
+    }
+
     // ShowOff NVSE — optional dependency
     s_exprGetEquippedWeaponType = s_script->CompileExpression("GetEquippedWeaponType");
     if (!s_exprGetEquippedWeaponType) {
         _MESSAGE("Animation_Init: GetEquippedWeaponType not available (ShowOff NVSE not installed?)");
     }
 
-    _MESSAGE("Animation_Init: complete (IsWeaponOut=%p, IsSneaking=%p, GetEquippedWeaponType=%p)",
-             s_exprIsWeaponOut, s_exprIsSneaking, s_exprGetEquippedWeaponType);
+    _MESSAGE("Animation_Init: complete (IsWeaponOut=%p, IsSneaking=%p, GetAnimAction=%p, GetEquippedWeaponType=%p)",
+             s_exprIsWeaponOut, s_exprIsSneaking, s_exprGetAnimAction, s_exprGetEquippedWeaponType);
+}
+
+void Animation_ApplyFire(TESObjectREFR* npc, double currentTime, EntityAnimState& animState)
+{
+    if (!npc || !s_console) return;
+
+    int wtype = animState.cachedWeaponType;
+
+    if (wtype >= 3 && wtype <= 9) {
+        // Ranged weapon
+        bool aimingIS = (animState.prevActionState & ActionAimingIS) != 0;
+        if (aimingIS) {
+            RunCmd(npc, "PlayGroup AttackLeftIS 1\nPlayGroup AimIS 0");
+        } else {
+            RunCmd(npc, "PlayGroup AttackLeft 1");
+        }
+        RunCmd(npc, "PlaySound3D (GetWeaponSound (GetEquippedWeapon) 0)");
+    } else if (wtype >= 0 && wtype <= 2) {
+        // Melee weapon
+        RunCmd(npc, "PlayGroup AttackRight 1");
+        animState.attackAnimEndTime = currentTime + MELEE_ANIM_DURATION;
+    } else if (wtype >= 10 && wtype <= 13) {
+        // Thrown weapon
+        RunCmd(npc, "PlayGroup AttackThrow6 1");
+        animState.attackAnimEndTime = currentTime + THROWN_ANIM_DURATION;
+    } else {
+        // Unknown weapon type, fallback to generic attack
+        RunCmd(npc, "PlayGroup AttackLeft 1");
+    }
 }
 
 void Animation_ApplyState(TESObjectREFR* npc, uint32_t netEntityId,
@@ -369,6 +398,7 @@ void Animation_Shutdown()
 {
     s_exprIsWeaponOut = nullptr;
     s_exprIsSneaking  = nullptr;
+    s_exprGetAnimAction = nullptr;
     s_exprGetEquippedWeaponType = nullptr;
     _MESSAGE("Animation_Shutdown: complete");
 }

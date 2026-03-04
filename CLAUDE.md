@@ -45,17 +45,18 @@ This is a **multiplayer mod** for Fallout: New Vegas. Spawned "NPCs" are actuall
 - `SetCombatDisabled 1` — prevents combat during unrestrained windows
 - Per-tick `SetPos` — corrects any autonomous movement during unrestrained windows
 
-**Draw**: `SetRestrained 0` → `SetWeaponOut 1` → `SetAlert 1` (all same tick, in order) → each tick poll `IsWeaponOut` → when returns 1, `SetRestrained 1`
+**Draw**: `SetRestrained 0` → `SetWeaponOut 1` → `SetAlert 1` (all same tick, in order) → each tick poll `GetAnimAction` → wait for value 0 (equip in progress) → wait for value != 0 (equip complete) → `SetRestrained 1`
 
-**Holster**: `SetRestrained 0` → `SetWeaponOut 0` → `SetAlert 0` (all same tick, in order) → each tick poll `IsWeaponOut` → when returns 0, `SetRestrained 1`
+**Holster**: `SetRestrained 0` → `SetWeaponOut 0` → `SetAlert 0` (all same tick, in order) → each tick poll `GetAnimAction` → wait for value 1 (unequip in progress) → wait for value != 1 (unequip complete) → `SetRestrained 1`
 
-`IsWeaponOut` updates before the animation visually finishes, but re-applying `SetRestrained 1` at that point is safe — the animation continues to completion.
+`IsWeaponOut` is kept as a fallback in `ApplyWeapon` to correct tracked state on every tick (handles late join, cell transitions).
 
 **What does NOT work** for weapon draw on restrained actors:
 - `SetWeaponOut` while restrained — silently ignored
 - `PlayGroup Equip 1` — no effect
 - `BaseProcess::SetWeaponOut` virtual (C++ direct call) — flips flag but doesn't attach weapon mesh to grip node
 - Fixed delay instead of polling — works but unnecessarily slow and fragile
+- `IsWeaponOut` for timing-sensitive completion detection — only updates when animation fully finishes, not when it starts. Use `GetAnimAction` instead.
 
 ## Animation testing (console)
 

@@ -190,6 +190,40 @@ static void HandleReceive(ENetPeer* peer, ENetPacket* packet)
         break;
     }
 
+    case MSG_PLAYER_FIRE: {
+        if (packet->dataLength < sizeof(MsgPlayerFire)) {
+            printf("PlayerFire too short from peer\n");
+            break;
+        }
+        if (it == g_players.end()) break;
+
+        MsgPlayerFire msg;
+        std::memcpy(&msg, packet->data, sizeof(msg));
+
+        if (msg.netEntityId != it->second.netEntityId) {
+            printf("PlayerFire netEntityId mismatch: got %u, expected %u\n",
+                   msg.netEntityId, it->second.netEntityId);
+            break;
+        }
+
+        // Relay to all other players as MSG_REMOTE_FIRE (reliable)
+        MsgRemoteFire relay;
+        relay.msgType = MSG_REMOTE_FIRE;
+        relay.netEntityId = msg.netEntityId;
+
+        for (auto& kv : g_players) {
+            if (kv.first == peer) continue;
+            ENetPacket* pkt = enet_packet_create(&relay, sizeof(relay), ENET_PACKET_FLAG_RELIABLE);
+            enet_peer_send(kv.first, CHANNEL_GAME_EVENTS, pkt);
+        }
+
+        if (g_verbose) {
+            printf("Player %u fired, relayed to %u others\n",
+                   msg.netEntityId, (unsigned)(g_players.size() - 1));
+        }
+        break;
+    }
+
     default:
         printf("Unknown message type %u from peer\n", msgType);
         break;

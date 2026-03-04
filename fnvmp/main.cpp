@@ -48,9 +48,9 @@ static float  g_prevPosX = 0, g_prevPosY = 0, g_prevPosZ = 0;
 static float  g_prevRotZ = 0;
 static bool   g_prevPosValid = false;
 
-// Attack edge detection — per-tick polling, latched until consumed by 20Hz snapshot
-static int    g_prevAnimAction = 0;   // previous tick's GetAnimAction value
-static bool   g_attackDetected = false; // latched: true when a new attack starts
+// GetAnimAction edge detection — per-tick polling
+static int    g_prevAnimAction = -1;  // previous tick's GetAnimAction value (-1 = None)
+static bool   g_isWeaponOut    = false; // derived from GetAnimAction 0/1 transitions
 
 // --------------------------------------------------
 // Helpers
@@ -236,6 +236,16 @@ static void MessageHandler(NVSEMessagingInterface::Message* msg)
 		}
 	}
 
+	// Process fire events from server (reliable)
+	if (g_netClient.HasFireEvents())
+	{
+		auto events = g_netClient.TakeFireEvents();
+		for (uint32_t id : events)
+		{
+			EntityManager_ApplyFireEvent(id, g_gameTime);
+		}
+	}
+
 	// Process world snapshot from server
 	if (g_netClient.HasNewWorldSnapshot())
 	{
@@ -250,25 +260,34 @@ static void MessageHandler(NVSEMessagingInterface::Message* msg)
 	// Execute pending entity operations (spawn, despawn, interpolated position update)
 	EntityManager_Tick(g_gameTime);
 
-	// Per-tick attack edge detection (runs every frame, not just at 20Hz)
+	// Per-tick GetAnimAction edge detection (runs every frame)
 	if (g_thePlayer && *g_thePlayer && s_exprGetAnimAction)
 	{
 		TESObjectREFR* player = *g_thePlayer;
 		int animAction = (int)PollNumber(s_exprGetAnimAction, player);
 
-		// Detect transition INTO attack actions:
-		// 3=Attack, 4=AttackEject, 5=AttackFollowThrough, 6=AttackThrow
-		bool wasAttacking = (g_prevAnimAction >= 3 && g_prevAnimAction <= 6);
-		bool isAttacking  = (animAction >= 3 && animAction <= 6);
+		// Weapon draw/holster: GetAnimAction 0 = equip started, 1 = unequip started
+		if (animAction == 0 && g_prevAnimAction != 0) {
+			g_isWeaponOut = true;
+		}
+		if (animAction == 1 && g_prevAnimAction != 1) {
+			g_isWeaponOut = false;
+		}
 
-		if (isAttacking && !wasAttacking) {
-			g_attackDetected = true;  // latch until consumed by next snapshot
+		// Fire event: detect transition INTO attack actions {2,3,5,6}
+		// 2=Attack, 3=FollowThrough, 5=ThrowAttach, 6=ThrowRelease
+		// 4=AttackLatency excluded: semi-auto cycles 2→4→2 per shot, each 4→2 is a new attack
+		bool isAttackAction  = (animAction >= 2 && animAction <= 6 && animAction != 4);
+		bool wasAttackAction = (g_prevAnimAction >= 2 && g_prevAnimAction <= 6 && g_prevAnimAction != 4);
+
+		if (isAttackAction && !wasAttackAction && g_netClient.IsConnected()) {
+			g_netClient.SendFireEvent(g_netClient.GetNetEntityId());
 		}
 
 		g_prevAnimAction = animAction;
 	}
 
-	// Send player snapshot at 20 Hz (only when a savegame is loaded)
+	// Send player snapshot at configured rate (only when a savegame is loaded)
 	if (g_netClient.IsConnected() && g_thePlayer && *g_thePlayer
 		&& (*g_thePlayer)->parentCell)
 	{
@@ -278,6 +297,12 @@ static void MessageHandler(NVSEMessagingInterface::Message* msg)
 			g_snapshotAccum -= SNAPSHOT_SEND_INTERVAL;
 
 			TESObjectREFR* player = *g_thePlayer;
+
+			// IsWeaponOut fallback: correct g_isWeaponOut from ground truth every snapshot
+			if (s_exprIsWeaponOut) {
+				bool actual = (PollNumber(s_exprIsWeaponOut, player) >= 1.0);
+				g_isWeaponOut = actual;
+			}
 
 			MsgPlayerSnapshot snap;
 			snap.netEntityId   = g_netClient.GetNetEntityId();
@@ -291,16 +316,12 @@ static void MessageHandler(NVSEMessagingInterface::Message* msg)
 			snap.moveDirection = ComputeMoveDirection(player->posX, player->posY, player->posZ, player->rotZ);
 			snap.isRunning     = (uint8_t)PollNumber(s_exprIsRunning, player);
 			snap.isSneaking    = (uint8_t)PollNumber(s_exprIsSneaking, player);
-			snap.isWeaponOut   = (uint8_t)(PollNumber(s_exprIsWeaponOut, player) >= 1.0 ? 1 : 0);
+			snap.isWeaponOut   = g_isWeaponOut ? 1 : 0;
 
-			// Action state bitmask
+			// Action state bitmask (firing removed — sent as reliable event)
 			uint8_t action = ActionNone;
 			double animAction = PollNumber(s_exprGetAnimAction, player);
-			if ((int)animAction == 9) action |= ActionReloading;  // kAnimAction_Reload
-			if (g_attackDetected) {
-				action |= ActionFiring;
-				g_attackDetected = false;  // consume the latched event
-			}
+			if ((int)animAction == 9) action |= ActionReloading;
 			if (s_exprIsAiming && PollNumber(s_exprIsAiming, player) >= 1.0)
 				action |= ActionAimingIS;
 			snap.actionState = action;

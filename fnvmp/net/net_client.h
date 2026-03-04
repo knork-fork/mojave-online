@@ -28,6 +28,9 @@ public:
     // Send a player snapshot. Fills in msgType and sequence automatically.
     void SendPlayerSnapshot(struct MsgPlayerSnapshot& snapshot);
 
+    // Send a fire event to server (reliable, CHANNEL_GAME_EVENTS).
+    void SendFireEvent(uint32_t netEntityId);
+
     bool IsConnected() const { return m_connected; }
     uint32_t GetNetEntityId() const { return m_netEntityId; }
 
@@ -39,6 +42,10 @@ public:
     // Disconnect events (queued by Poll, consumed by main loop)
     bool HasDisconnectEvents() const { return !m_disconnectedEntities.empty(); }
     std::vector<uint32_t> TakeDisconnectEvents();
+
+    // Remote fire events (queued by Poll, consumed by main loop)
+    bool HasFireEvents() const { return !m_fireEvents.empty(); }
+    std::vector<uint32_t> TakeFireEvents();
 
 private:
     void HandleReceive(ENetEvent& event);
@@ -59,4 +66,7 @@ private:
 
     // Queued disconnect events
     std::vector<uint32_t> m_disconnectedEntities;
+
+    // Queued remote fire events (netEntityIds of players who fired)
+    std::vector<uint32_t> m_fireEvents;
 };

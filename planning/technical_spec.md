@@ -93,7 +93,7 @@ ENet rationale: provides exactly the reliability model we need (unreliable + rel
 | Channel | Reliability | Usage |
 |---------|-------------|-------|
 | 0 | Unreliable | Position/rotation/movement snapshots |
-| 1 | Reliable ordered | Game events (spawn, death, equip, damage, ownership, health) |
+| 1 | Reliable ordered | Game events (spawn, death, equip, damage, ownership, health, fire) |
 | 2 | Reliable ordered | System messages (auth, heartbeat, disconnect) |
 
 ### 3.5 Version Compatibility
@@ -130,7 +130,7 @@ struct EntityState {
     uint8_t  moveDirection;  // enum: None, Forward, Backward, Left, Right, ForwardLeft, ForwardRight, BackwardLeft, BackwardRight, TurnLeft, TurnRight
     uint8_t  isRunning;      // 1 = run mode, 0 = walk mode (only meaningful when moveDirection != None)
     uint32_t weaponFormId;   // currently drawn weapon (0 = holstered)
-    uint8_t  actionState;    // bitmask: None=0, Firing=1, Reloading=2, AimingIS=4 (combinations valid, e.g. Firing|AimingIS=5)
+    uint8_t  actionState;    // bitmask: None=0, Reloading=2, AimingIS=4 (Firing removed — fire events use MSG_PLAYER_FIRE)
     uint8_t  isSneaking;     // 1 = sneaking, 0 = not sneaking
 };
 ```
@@ -169,6 +169,7 @@ Contains all entities relevant to the receiving client (other players + NPCs in 
 | `EquipChange` | Player → Server → All | `{ netEntityId, slot, formId, isEquip }` |
 | `InventorySync` | Player → Server → All | `{ netEntityId, itemCount, items[] }` |
 | `CorpseSpawn` | Server → All | `{ netEntityId, posX/Y/Z, rotZ, inventorySnapshot }` |
+| `FireEvent` | Attacker → Server → All | `MSG_PLAYER_FIRE { netEntityId }` / `MSG_REMOTE_FIRE { netEntityId }` — reliable, channel 1 (game events) |
 | `OwnershipTransfer` | Server → All | `{ zoneKey, newOwnerNetEntityId }` |
 | `PlayerConnect` | Server → All | `{ netEntityId, playerName }` |
 | `PlayerDisconnect` | Server → All | `{ netEntityId }` |
@@ -401,7 +402,7 @@ All connected players are effectively companions to each other:
 ## 10. Animation Sync
 
 v0.5 is split into two sub-phases that are implemented together. These apply to all synced avatars — both remote player NPCs and zone-owner-reported NPCs:
-- **Detection**: Sampling animation state from the local player and from zone-owned NPCs. Some states are derived from movement (position delta vs facing direction). Some states are polled from engine functions (`IsRunning`, `IsSneaking`, `IsAiming`, `IsAttacking`, `IsWeaponOut`, `GetAnimAction`). Fully researched — see §10.4.
+- **Detection**: Sampling animation state from the local player and from zone-owned NPCs. Some states are derived from movement (position delta vs facing direction). Some states are polled from engine functions (`IsRunning`, `IsSneaking`, `IsAiming`, `IsWeaponOut`, `GetAnimAction`). Fire detection uses `GetAnimAction` edge detection. Fully researched — see §10.4.
 - **Application**: Applying received animation state to remote avatars via `PlayGroup` and related commands. Fully researched — see §10.1.
 
 ### 10.1 Application — All Avatars (Players and NPCs)
@@ -461,6 +462,8 @@ Diagonal combinations: play both animgroups on the same tick.
 > **Holster**: `SetRestrained 0` → `SetWeaponOut 0` → `SetAlert 0` (all same tick, in order) → each tick check `IsWeaponOut` → when returns 0, `SetRestrained 1`
 >
 > `IsWeaponOut` updates before the animation visually finishes, but re-applying `SetRestrained 1` at that point is safe — the animation continues to completion. `SetAlert 1` keeps the weapon unholstered after draw; `SetAlert 0` allows holster to proceed.
+>
+> **Completion detection** (receiver side): `GetAnimAction` is now used instead of `IsWeaponOut` polling. Draw complete = `GetAnimAction` transitions from 0 to any non-0 value. Holster complete = `GetAnimAction` transitions from 1 to any non-1 value. A `weaponAnimSeen` flag tracks whether the expected `GetAnimAction` value (0 for draw, 1 for holster) has been observed at least once, preventing false-positive early completion when `GetAnimAction` hasn't yet transitioned to the expected value. `IsWeaponOut` remains as a periodic 30Hz fallback for ground-truth correction.
 
 #### Phase 3/4 — Upper-Body Actions
 
@@ -524,7 +527,7 @@ Two distinct layers:
 **Plugin state layer** — tracks authoritative state from network snapshots. Pure data, no engine calls:
 - `moveDirection` — movement direction relative to facing (None, Forward, Backward, Left, Right, ForwardLeft, ForwardRight, BackwardLeft, BackwardRight, TurnLeft, TurnRight)
 - `isRunning` — walk vs run mode (determines Walk vs Fast animation variants)
-- `actionState` — current upper-body action (bitmask: None, Firing, Reloading, AimingIS — combinations like Firing|AimingIS = aimed fire)
+- `actionState` — current upper-body action (bitmask: None=0, Reloading=2, AimingIS=4). Firing removed from bitmask — fire events use reliable MSG_PLAYER_FIRE/MSG_REMOTE_FIRE
 - `weaponFormId` — currently drawn weapon (0 = holstered)
 - `isSneaking` — sneak mode flag
 
@@ -534,14 +537,14 @@ Two distinct layers:
 |---|---|---|
 | `moveDirection` + `isRunning` | `PlayGroup <AnimGroup>` | Every tick; all locomotion anims loop. Direction selects the animgroup(s), isRunning selects walk vs fast variant. Combine two animgroups for diagonals (e.g. `Forward` + `Left`). See §10.1 Phase 1 table |
 | `isSneaking` changed | Unrestrain → `SetForceSneak` → poll `IsSneaking` (returns text, not 0/1) → re-restrain | Same pattern as weapon draw/holster. Locomotion anims continue naturally after sneak toggle |
-| `weaponFormId` changed | Unrestrain → `SetWeaponOut` + `SetAlert` → poll `IsWeaponOut` → re-restrain | See §10.1 weapon draw/holster |
-| `actionState` has Firing (ranged, no AimingIS) | `PlayGroup AttackLeft 1` + `PlaySound3D` (weapon sound) | Sound via `GetWeaponSound weapon 0`. Per shot. Weapon type from `GetEquippedWeaponType` on `weaponFormId` |
-| `actionState` has Firing + AimingIS (ranged) | `PlayGroup AttackLeftIS 1` → `PlayGroup AimIS 0` + `PlaySound3D` | Chain ensures return to AimIS after attack |
-| `actionState` has Firing (melee) | `PlayGroup AttackRight 1` | Works for both 1H and 2H melee. Weapon type: `GetEquippedWeaponType` returns 0–2 |
-| `actionState` has Firing (thrown) | `PlayGroup AttackThrow6 1` | Universal placeholder. Weapon type: `GetEquippedWeaponType` returns 10–13 |
-| `actionState` has Firing (creature) | Alert/unholster + `PlayGroup AttackRight 1` | Check alert state + melee weapon, not human/non-human |
+| `weaponFormId` changed | Unrestrain → `SetWeaponOut` + `SetAlert` → poll `GetAnimAction` for completion (with `weaponAnimSeen` flag) → re-restrain. `IsWeaponOut` as 30Hz fallback | See §10.1 weapon draw/holster |
+| Received `MSG_REMOTE_FIRE` (ranged, no AimingIS) | `PlayGroup AttackLeft 1` + `PlaySound3D` (weapon sound) | Triggered by reliable fire event, not actionState. Sound via `GetWeaponSound weapon 0`. Weapon type from `GetEquippedWeaponType` on `weaponFormId` |
+| Received `MSG_REMOTE_FIRE` (ranged, AimingIS active) | `PlayGroup AttackLeftIS 1` → `PlayGroup AimIS 0` + `PlaySound3D` | Chain ensures return to AimIS after attack |
+| Received `MSG_REMOTE_FIRE` (melee) | `PlayGroup AttackRight 1` | Works for both 1H and 2H melee. Weapon type: `GetEquippedWeaponType` returns 0–2 |
+| Received `MSG_REMOTE_FIRE` (thrown) | `PlayGroup AttackThrow6 1` | Universal placeholder. Weapon type: `GetEquippedWeaponType` returns 10–13 |
+| Received `MSG_REMOTE_FIRE` (creature) | Alert/unholster + `PlayGroup AttackRight 1` | Check alert state + melee weapon, not human/non-human |
 | `actionState` == AimingIS only | `PlayGroup AimIS 1` | Independent of SetRestrained and locomotion |
-| `actionState` has Reloading | `PlayGroup ReloadA 1` | Independent of SetRestrained. Has built-in sound. Highest priority — overrides firing/aiming |
+| `actionState` has Reloading | `PlayGroup ReloadA 1` | Independent of SetRestrained. Has built-in sound. Highest priority — overrides aiming |
 | `actionState` == None, weapon drawn | `PlayGroup Aim 1` | Weapon lowered idle stance |
 | `actionState` == None, no weapon | Just locomotion | No upper-body override |
 
@@ -555,7 +558,7 @@ Detection runs **on the sender only** — the client that "owns" an actor polls 
 
 The same detection logic and functions apply to both players and NPCs. All functions below work for both.
 
-**Plugin dependencies**: ShowOff NVSE (`IsAiming`, `GetEquippedWeaponType`), JIP LN NVSE (`IsAttacking`). Both are common dependencies used by many mods.
+**Plugin dependencies**: ShowOff NVSE (`IsAiming`, `GetEquippedWeaponType`). JIP LN NVSE is no longer required for detection (`IsAttacking` replaced by `GetAnimAction` edge detection).
 
 #### Movement direction (inferred from position + rotation)
 
@@ -576,21 +579,19 @@ This works correctly regardless of simultaneous mouse rotation — the relative 
 |---|---|---|---|
 | `IsRunning` | Base game | 0/1 | `isRunning` flag. Note: returns 1 in "run mode" even when standing still (Caps Lock toggles). Only meaningful when combined with movement detection |
 | `IsSneaking` | Base game | 0/1 | `isSneaking` flag |
-| `IsWeaponOut` | Base game | 0/1 | When changed: update `weaponFormId` via `GetEquippedWeapon`. 0 → holstered (`weaponFormId = 0`) |
-| `IsAiming` | ShowOff NVSE | 0/1 | `ActionAimingIS` bit in `actionState`. Stays 1 during aimed fire (both `IsAiming` and `IsAttacking` are 1 simultaneously) |
-| `IsAttacking` | JIP LN NVSE | 0/1 | `ActionFiring` bit in `actionState`. Duration-based: stays 1 for the full attack. Semi-auto/melee/thrown: one 0→1 transition = one attack. Automatic: stays 1 while firing |
-| `GetAnimAction` | Base game | int | Only used for reload detection: value `9` = `ActionReloading` in `actionState` |
+| `IsWeaponOut` | Base game | 0/1 | Periodic 30Hz fallback for ground-truth weapon state correction. Primary weapon draw/holster detection uses `GetAnimAction` transitions (0=equip started, 1=unequip started). When changed: update `weaponFormId` via `GetEquippedWeapon`. 0 → holstered (`weaponFormId = 0`) |
+| `IsAiming` | ShowOff NVSE | 0/1 | `ActionAimingIS` bit in `actionState`. Stays 1 during aimed fire |
+| `GetAnimAction` | Base game | int | Multi-purpose per-tick edge detection: weapon draw/holster (0=equip started, 1=unequip started), fire detection (values {2,3,5,6} = attack set — transition from non-attack to attack sends reliable `MSG_PLAYER_FIRE` immediately; 4=AttackLatency excluded so semi-auto 2→4→2 cycles each trigger a new fire event), reload detection (value 9 = `ActionReloading` in `actionState`) |
 
 #### ActionState priority (per tick)
 
 `actionState` is a bitmask built from the above flags:
 1. If `GetAnimAction == 9` → `ActionReloading` (highest priority, overrides all)
-2. If `IsAttacking == 1` → set `ActionFiring` bit
-3. If `IsAiming == 1` → set `ActionAimingIS` bit
-4. Both `ActionFiring | ActionAimingIS` = aimed fire (receiver plays `AttackLeftIS` → `AimIS`)
-5. `ActionFiring` alone = hip fire (receiver plays `AttackLeft`)
-6. `ActionAimingIS` alone = just aiming (receiver plays `AimIS`)
-7. Neither = `ActionNone`
+2. If `IsAiming == 1` → set `ActionAimingIS` bit
+3. `ActionAimingIS` alone = just aiming (receiver plays `AimIS`)
+4. Neither = `ActionNone`
+
+Fire events are no longer part of `actionState`. Instead, `GetAnimAction` per-tick edge detection (transition from non-attack to attack set {2,3,5,6}) sends a reliable `MSG_PLAYER_FIRE` event immediately. 4=AttackLatency is excluded from the attack set so that semi-auto fire (which cycles 2→4→2 per shot) correctly triggers a fire event for each shot.
 
 #### Weapon type classification (receiving side only)
 
@@ -994,31 +995,30 @@ Upper-body action overlaid on locomotion. Independent of `moveDirection` / `isRu
 ```cpp
 enum ActionState : uint8_t {
     ActionNone       = 0,  // no special action
-    ActionFiring     = 1,  // attack (animgroup depends on weapon type)
+    // ActionFiring (1) removed — fire events are sent as MSG_PLAYER_FIRE on the reliable channel instead
     ActionReloading  = 2,  // weapon reload (ranged only)
     ActionAimingIS   = 4,  // iron sights (ranged only)
-    // Combinations:
-    // ActionFiring | ActionAimingIS = 5  → aimed fire (AttackLeftIS → AimIS)
 };
 ```
 
 Weapon draw/holster is tracked via `weaponFormId`, not `actionState`.
 Sneak enter/exit is tracked via `isSneaking` flag, not `actionState`.
 
-**Detection** (see §10.4 for details): `actionState` is built per tick from `IsAttacking` (bit 1), `GetAnimAction == 9` (bit 2), and `IsAiming` (bit 4). Reloading has highest priority and overrides firing/aiming bits.
+**Detection** (see §10.4 for details): `actionState` is built per tick from `GetAnimAction == 9` (bit 2) and `IsAiming` (bit 4). Reloading has highest priority and overrides aiming. Fire events are detected separately via `GetAnimAction` edge detection (transition to attack set {2,3,5,6}, excluding 4=AttackLatency) and sent as reliable `MSG_PLAYER_FIRE`.
 
 **Engine application** (see §10.3 for full table):
 
 1. **Locomotion**: `PlayGroup` from `moveDirection` + `isRunning`. All locomotion anims loop. Combine animgroups for diagonals.
 2. **Sneak**: Unrestrain → `SetForceSneak` → poll `IsSneaking` (returns text `"is sneaking"` / `"is not sneaking"`, not 0/1) → re-restrain.
-3. **Weapon**: Temporary unrestrain + poll `IsWeaponOut` (see §10.1 weapon draw/holster).
-4. **Actions**: If `actionState != None`, the animgroup depends on weapon type (via `GetEquippedWeaponType` on `weaponFormId`):
-   - `Firing` (ranged, no AimingIS bit) → `AttackLeft` (0x1A) + `PlaySound3D` (weapon sound)
-   - `Firing | AimingIS` (ranged) → `AttackLeftIS` (0x1D) → `AimIS` (0x14) with flag 0 + `PlaySound3D`
-   - `Firing` (melee, type 0–2) → `AttackRight` (0x20) — works for both 1H and 2H
-   - `Firing` (thrown, type 10–13) → `AttackThrow6` (0x96) — universal placeholder
-   - `Firing` (creature/non-human) → `AttackRight` (0x20) after alert/unholster
+3. **Weapon**: Temporary unrestrain + poll `GetAnimAction` for completion (with `weaponAnimSeen` flag), `IsWeaponOut` as 30Hz fallback (see §10.1 weapon draw/holster).
+4. **Actions** (`actionState`): If `actionState != None`, the animgroup depends on weapon type (via `GetEquippedWeaponType` on `weaponFormId`):
    - `Reloading` → `ReloadA` (0xB1) — has built-in sound. Highest priority
    - `AimingIS` only → `AimIS` (0x14)
-5. **Idle stance**: If `actionState == None` and `weaponFormId != 0`, `PlayGroup Aim` (0x11)
-6. **Default**: If `actionState == None` and `weaponFormId == 0`, just locomotion
+5. **Fire** (reliable event): On receiving `MSG_REMOTE_FIRE`, play attack animation based on weapon type:
+   - Ranged (no AimingIS) → `AttackLeft` (0x1A) + `PlaySound3D` (weapon sound)
+   - Ranged (AimingIS active) → `AttackLeftIS` (0x1D) → `AimIS` (0x14) with flag 0 + `PlaySound3D`
+   - Melee (type 0–2) → `AttackRight` (0x20) — works for both 1H and 2H
+   - Thrown (type 10–13) → `AttackThrow6` (0x96) — universal placeholder
+   - Creature/non-human → `AttackRight` (0x20) after alert/unholster
+6. **Idle stance**: If `actionState == None` and `weaponFormId != 0`, `PlayGroup Aim` (0x11)
+7. **Default**: If `actionState == None` and `weaponFormId == 0`, just locomotion

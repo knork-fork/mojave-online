@@ -15,6 +15,9 @@ void EntityManager_Init(NVSEScriptInterface* script, NVSEConsoleInterface* conso
 // snapshotTime = client-local monotonic clock at time of receipt.
 void EntityManager_UpdateFromWorldSnapshot(const EntityState* states, uint16_t count, double snapshotTime);
 
+// Apply a fire event to a remote entity. Called when MSG_REMOTE_FIRE is received.
+void EntityManager_ApplyFireEvent(uint32_t netEntityId, double currentTime);
+
 // Queue an entity for despawn (called on PlayerDisconnect).
 void EntityManager_RemoveEntity(uint32_t netEntityId);
 

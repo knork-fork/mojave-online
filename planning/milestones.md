@@ -119,7 +119,7 @@ This milestone is split into two sub-phases that are implemented together:
 
 Sampling animation state from actors (local player in v0.5, zone-owned NPCs in v0.7) to include in snapshots. The same detection logic applies to both — v0.5 proves it on the local player, v0.7 extends it to NPCs. All detection functions work for both players and NPCs.
 
-**Plugin dependencies**: ShowOff NVSE (`IsAiming`, `GetEquippedWeaponType`), JIP LN NVSE (`IsAttacking`).
+**Plugin dependencies**: ShowOff NVSE (`IsAiming`, `GetEquippedWeaponType`). JIP LN NVSE dependency removed — `IsAttacking` replaced by `GetAnimAction` edge detection (base game function).
 
 **Movement direction** — inferred from position + rotation each tick:
 - Compute angle between position delta (movement vector) and `rotZ` (facing direction)
@@ -131,12 +131,13 @@ Sampling animation state from actors (local player in v0.5, zone-owned NPCs in v
 **State flags** — polled per tick:
 - `IsRunning` (base game) → `isRunning` flag. Note: returns 1 in "run mode" even when idle (Caps Lock toggles), so only meaningful when combined with movement. Sprinting treated as running for v0.5
 - `IsSneaking` (base game) → `isSneaking` flag
-- `IsWeaponOut` (base game) → when changed, update `weaponFormId` via `GetEquippedWeapon`
+- `GetAnimAction` (base game) → values 0 (holstering) / 1 (drawing) detect weapon draw/holster transitions. `IsWeaponOut` used as 30Hz fallback if `GetAnimAction` misses a transition
 - `IsAiming` (ShowOff) → `ActionAimingIS` bit in `actionState`. Stays 1 during aimed fire
-- `IsAttacking` (JIP) → `ActionFiring` bit in `actionState`. Duration-based: stays 1 for full attack. Semi-auto/melee/thrown: one 0→1 = one attack. Automatic: stays 1 while firing
-- `GetAnimAction` (base game) → only used for reload: value 9 = `ActionReloading`
+- `GetAnimAction` (base game) → edge detection for multiple actions: values 0/1 for weapon draw/holster (see above), value 9 = `ActionReloading`. Also replaces `IsAttacking` for fire detection via edge detection on attack set {2,3,5,6} (4=AttackLatency excluded so semi-auto 2→4→2 cycles each trigger a new fire event; no JIP LN NVSE dependency)
 
-**ActionState priority**: Reloading (highest) > Firing > AimingIS. Bitmask allows combinations (e.g. Firing|AimingIS = aimed fire)
+**Fire events**: Firing is not sent via the unreliable snapshot `actionState` bitmask. Instead, fire events use reliable `MSG_PLAYER_FIRE` (client → server) / `MSG_REMOTE_FIRE` (server → client) messages on `CHANNEL_GAME_EVENTS`, ensuring no missed shots due to packet loss.
+
+**ActionState priority**: Reloading (highest) > AimingIS. Bitmask allows combinations where applicable
 
 **Weapon type classification** — done on the *receiving* side, not the sending side. Receiver calls `GetEquippedWeaponType` (ShowOff) on the received `weaponFormId`: 0–2 = melee, 3–9 = ranged, 10–13 = thrown
 
@@ -159,6 +160,7 @@ Applying received animation state to remote player NPCs. All findings from in-ga
 
 **Weapon draw/holster** (requires unrestrain workaround):
 - Already researched — see v0.4 notes and tech spec §10.1
+- Completion detection on receiver uses `GetAnimAction` polling (instead of `IsWeaponOut`) to determine when to re-restrain
 
 **Non-melee weapons (pistols, rifles)** — all independent of SetRestrained:
 - Aiming: `PlayGroup AimIS 1` (aim down sights), `PlayGroup Aim 1` (lower weapon)
@@ -442,8 +444,9 @@ Applying received animation state to remote player NPCs. All findings from in-ga
 - Weapon-specific reload variants (ReloadB, ReloadC, etc. — some weapons use different reload animations than ReloadA)
 - Per-weapon thrown animation mapping (spears use AttackThrow7, grenades use AttackThrow, etc. instead of universal AttackThrow6)
 - Multiple melee attack patterns and blocking (v0.5 uses only AttackRight for all melee)
-- Automatic weapon sustained fire optimization (server-side smoothing for smoother shooting animations)
-- Muzzle flash for ranged weapon attacks
+- Automatic weapon sustained fire: `GetAnimAction` returns 2 for the entire duration of automatic fire, so only the first shot is detected. Needs a different approach (e.g. timer-based repeated fire events while animAction stays 2)
+- Muzzle flash for ranged weapon attacks (verify not already present from `PlayGroup Attack` — may need explicit particle attach)
+- Bullet impact decals (bullet holes on hit surfaces) and ejected shell casings from weapon
 - Jump animations (JumpStart, JumpLoop, JumpLand)
 - Stagger / hit reaction / damage-taking animations
 - Non-human creature attack variety (v0.5 uses only AttackRight for all creatures)
@@ -456,10 +459,11 @@ Applying received animation state to remote player NPCs. All findings from in-ga
 1. Player reloads different weapon types → each plays the correct reload animation variant
 2. Player throws a spear → correct throw animation plays. Player throws a grenade → different animation
 3. Player uses melee weapon → varied attack patterns, not just AttackRight every time
-4. Player fires automatic weapon → smooth sustained fire animation on remote NPC
-5. Player fires ranged weapon → muzzle flash visible on remote NPC
-6. Player jumps → remote NPC plays jump start/loop/land sequence
-7. Player takes damage → remote NPC shows hit reaction
+4. Player fires automatic weapon → sustained fire animation with repeated shots on remote NPC (not just one shot)
+5. Player fires ranged weapon → muzzle flash visible on remote NPC (if not already triggered by attack animgroup)
+6. Player fires ranged weapon → bullet holes appear on hit surfaces, shell casings eject from weapon on remote NPC
+7. Player jumps → remote NPC plays jump start/loop/land sequence
+8. Player takes damage → remote NPC shows hit reaction
 
 ---
 
