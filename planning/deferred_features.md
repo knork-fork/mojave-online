@@ -41,6 +41,7 @@ Features explicitly excluded from the initial version. These may be revisited in
 
 ## Animation
 
+- **Swimming animations** — swimming state is not synced; avatars will not play swim animations when the source player is swimming. The engine exposes `IsSwimming` (returns 0/1) which could be used to detect and sync this state in a future version
 - **Fine rotation** — only yaw (Z rotation) is synced; no pitch/roll
 - **Lip sync / facial expressions** — not synced
 - **Ragdoll sync** — each client handles ragdoll independently after Kill()
