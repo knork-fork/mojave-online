@@ -39,21 +39,23 @@ This is a **multiplayer mod** for Fallout: New Vegas. Spawned "NPCs" are actuall
 
 ## SetRestrained animation workaround
 
-`SetRestrained 1` blocks many animations (weapon draw/holster, possibly others) because the AI loop that processes state changes is suppressed. **The workaround is to temporarily unrestrain the actor:**
+`SetRestrained 1` blocks many animations (weapon draw/holster, possibly others) because the AI loop that processes state changes is suppressed. This pattern applies to any animation that requires AI loop processing.
 
-1. `SetRestrained 0` — drop the animation blocker
-2. Trigger the animation (e.g. `SetWeaponOut 1`, `SetAlert 1`)
-3. Wait/poll until the animation completes
-4. `SetRestrained 1` — re-apply
+**Prerequisites** (set once at NPC spawn):
+- `SetCombatDisabled 1` — prevents combat during unrestrained windows
+- Per-tick `SetPos` — corrects any autonomous movement during unrestrained windows
 
-`SetCombatDisabled 1` must also be set on the NPC (at spawn time) to prevent combat during unrestrained windows. Per-tick `SetPos` corrects any autonomous movement.
+**Draw**: `SetRestrained 0` → `SetWeaponOut 1` → `SetAlert 1` (all same tick, in order) → each tick poll `IsWeaponOut` → when returns 1, `SetRestrained 1`
+
+**Holster**: `SetRestrained 0` → `SetWeaponOut 0` → `SetAlert 0` (all same tick, in order) → each tick poll `IsWeaponOut` → when returns 0, `SetRestrained 1`
+
+`IsWeaponOut` updates before the animation visually finishes, but re-applying `SetRestrained 1` at that point is safe — the animation continues to completion.
 
 **What does NOT work** for weapon draw on restrained actors:
 - `SetWeaponOut` while restrained — silently ignored
 - `PlayGroup Equip 1` — no effect
 - `BaseProcess::SetWeaponOut` virtual (C++ direct call) — flips flag but doesn't attach weapon mesh to grip node
-
-This pattern likely applies to any animation that requires AI loop processing, not just weapon draw/holster.
+- Fixed delay instead of polling — works but unnecessarily slow and fragile
 
 ## NVSE API gotchas
 
