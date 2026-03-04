@@ -111,7 +111,7 @@
 
 ## v0.5 — Animation Sync
 
-**Goal**: Remote NPCs play correct locomotion and combat animations instead of sliding around in T-pose.
+**Goal**: Remote NPCs play correct locomotion and combat animations instead of sliding around in idle pose.
 
 This milestone is split into two sub-phases that are implemented together:
 
