@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // -----------------------------------------------
-// FNVMP Protocol — v0.3 (Two-Client Relay + Remote Player Avatar)
+// FNVMP Protocol — v0.5 (Animation Sync)
 // Shared between client (fnvmp.dll) and server (server.exe)
 // -----------------------------------------------
 
@@ -17,21 +17,26 @@ enum MessageType : uint8_t {
     MSG_PLAYER_DISCONNECT  = 7,   // server -> all (player left, reliable)
 };
 
-enum MovementState : uint8_t {
-    MS_Idle      = 0,
-    MS_Walk      = 1,
-    MS_Run       = 2,
-    MS_Sneak     = 3,
-    MS_SneakWalk = 4,
-    MS_SneakRun  = 5,
+enum MoveDirection : uint8_t {
+    DirNone         = 0,
+    DirForward      = 1,
+    DirBackward     = 2,
+    DirLeft         = 3,
+    DirRight        = 4,
+    DirForwardLeft  = 5,
+    DirForwardRight = 6,
+    DirBackwardLeft = 7,
+    DirBackwardRight= 8,
+    DirTurnLeft     = 9,
+    DirTurnRight    = 10,
 };
 
+// Bitmask — multiple bits can be set simultaneously
 enum ActionState : uint8_t {
-    AS_None      = 0,
-    AS_Firing    = 1,
-    AS_Reloading = 2,
-    AS_Melee     = 3,
-    AS_AimingIS  = 4,
+    ActionNone      = 0,
+    ActionFiring    = 1,
+    ActionReloading = 2,
+    ActionAimingIS  = 4,
 };
 
 // ENet channel assignments
@@ -65,9 +70,11 @@ struct MsgPlayerSnapshot {
     uint32_t cellId;         // refID of player's current cell
     float    posX, posY, posZ;
     float    rotZ;           // yaw only
-    uint8_t  movementState;  // MovementState enum
-    uint32_t weaponFormId;   // 0 = holstered
-    uint8_t  actionState;    // ActionState enum
+    uint8_t  moveDirection;  // MoveDirection enum
+    uint8_t  isRunning;      // 0 = walk, 1 = run
+    uint8_t  isSneaking;     // 0 = standing, 1 = sneaking
+    uint8_t  isWeaponOut;    // 0 = holstered, 1 = drawn
+    uint8_t  actionState;    // ActionState bitmask
 };
 
 // Per-entity state within a WorldSnapshot
@@ -76,8 +83,10 @@ struct EntityState {
     uint32_t cellId;
     float    posX, posY, posZ;
     float    rotZ;
-    uint8_t  movementState;
-    uint32_t weaponFormId;
+    uint8_t  moveDirection;
+    uint8_t  isRunning;
+    uint8_t  isSneaking;
+    uint8_t  isWeaponOut;
     uint8_t  actionState;
 };
 

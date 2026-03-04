@@ -18,8 +18,10 @@ struct PlayerInfo {
     uint32_t cellId         = 0;
     float    posX = 0, posY = 0, posZ = 0;
     float    rotZ = 0;
-    uint8_t  movementState  = 0;
-    uint32_t weaponFormId   = 0;
+    uint8_t  moveDirection  = 0;
+    uint8_t  isRunning      = 0;
+    uint8_t  isSneaking     = 0;
+    uint8_t  isWeaponOut    = 0;
     uint8_t  actionState    = 0;
 };
 
@@ -104,8 +106,10 @@ static void BroadcastWorldSnapshots()
             es.posY         = pi.posY;
             es.posZ         = pi.posZ;
             es.rotZ         = pi.rotZ;
-            es.movementState = pi.movementState;
-            es.weaponFormId  = pi.weaponFormId;
+            es.moveDirection = pi.moveDirection;
+            es.isRunning     = pi.isRunning;
+            es.isSneaking    = pi.isSneaking;
+            es.isWeaponOut   = pi.isWeaponOut;
             es.actionState   = pi.actionState;
 
             hdr->entityCount++;
@@ -172,8 +176,10 @@ static void HandleReceive(ENetPeer* peer, ENetPacket* packet)
         pi.posY          = snap.posY;
         pi.posZ          = snap.posZ;
         pi.rotZ          = snap.rotZ;
-        pi.movementState = snap.movementState;
-        pi.weaponFormId  = snap.weaponFormId;
+        pi.moveDirection = snap.moveDirection;
+        pi.isRunning     = snap.isRunning;
+        pi.isSneaking    = snap.isSneaking;
+        pi.isWeaponOut   = snap.isWeaponOut;
         pi.actionState   = snap.actionState;
 
         if (g_verbose) {

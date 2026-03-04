@@ -1,5 +1,6 @@
 #include "entity_manager.h"
 #include "interpolation.h"
+#include "animation.h"
 #include "protocol.h"
 
 #include "nvse/PluginAPI.h"
@@ -25,9 +26,13 @@ struct RemoteEntity {
     // for initial spawn placement (before interpolation has enough data).
     float    spawnPosX = 0, spawnPosY = 0, spawnPosZ = 0;
     float    spawnRotZ = 0;
-    uint8_t  movementState = 0;
-    uint32_t weaponFormId  = 0;
+    uint8_t  moveDirection  = 0;
+    uint8_t  isRunning     = 0;
+    uint8_t  isSneaking    = 0;
+    uint8_t  isWeaponOut   = 0;
     uint8_t  actionState   = 0;
+
+    EntityAnimState animState;  // per-entity animation tracking
 };
 
 static std::map<uint32_t, RemoteEntity> g_entities;       // netEntityId -> entity
@@ -97,6 +102,9 @@ void EntityManager_Init(NVSEScriptInterface* script, NVSEConsoleInterface* conso
     } else {
         _MESSAGE("EntityManager_Init: spawn expression compiled OK");
     }
+
+    // Initialize animation system
+    Animation_Init(script, console);
 }
 
 void EntityManager_UpdateFromWorldSnapshot(const EntityState* states, uint16_t count, double snapshotTime)
@@ -120,8 +128,10 @@ void EntityManager_UpdateFromWorldSnapshot(const EntityState* states, uint16_t c
             ent.spawnPosY     = es.posY;
             ent.spawnPosZ     = es.posZ;
             ent.spawnRotZ     = es.rotZ;
-            ent.movementState = es.movementState;
-            ent.weaponFormId  = es.weaponFormId;
+            ent.moveDirection = es.moveDirection;
+            ent.isRunning     = es.isRunning;
+            ent.isSneaking    = es.isSneaking;
+            ent.isWeaponOut   = es.isWeaponOut;
             ent.actionState   = es.actionState;
 
             g_entities[es.netEntityId] = ent;
@@ -131,8 +141,10 @@ void EntityManager_UpdateFromWorldSnapshot(const EntityState* states, uint16_t c
             // Existing entity — update non-positional state
             RemoteEntity& ent = it->second;
             ent.cellId        = es.cellId;
-            ent.movementState = es.movementState;
-            ent.weaponFormId  = es.weaponFormId;
+            ent.moveDirection = es.moveDirection;
+            ent.isRunning     = es.isRunning;
+            ent.isSneaking    = es.isSneaking;
+            ent.isWeaponOut   = es.isWeaponOut;
             ent.actionState   = es.actionState;
         }
 
@@ -269,6 +281,23 @@ void EntityManager_Tick(double currentTime)
         s_console->RunScriptLine2(buf, npc, true);
     }
 
+    // --- Apply animation state to all spawned entities ---
+    for (auto& kv : g_entities) {
+        RemoteEntity& ent = kv.second;
+        if (!ent.spawned) continue;
+
+        if (localCellId != 0 && ent.cellId != localCellId) continue;
+
+        TESObjectREFR* npc = ResolveRefr(ent.refID);
+        if (!npc) continue;
+
+        Animation_ApplyState(npc, ent.netEntityId,
+                             ent.moveDirection, ent.isRunning,
+                             ent.isWeaponOut, ent.actionState,
+                             ent.isSneaking, currentTime,
+                             ent.animState);
+    }
+
     RestoreConsole();
 }
 
@@ -299,6 +328,7 @@ void EntityManager_Shutdown()
     g_pendingSpawns.clear();
     g_pendingDespawns.clear();
     Interp_Clear();
+    Animation_Shutdown();
 
     _MESSAGE("EntityManager: shutdown complete");
 }

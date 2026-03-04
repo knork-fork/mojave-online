@@ -109,7 +109,7 @@
 
 ---
 
-## v0.5 — Animation Sync
+## v0.5 — Animation Sync (Completed)
 
 **Goal**: Remote NPCs play correct locomotion and combat animations instead of sliding around in idle pose.
 
@@ -202,6 +202,21 @@ Applying received animation state to remote player NPCs. All findings from in-ga
 3. Client A draws weapon → NPC draws weapon. Client A holsters → NPC holsters
 4. Client A fires → NPC plays fire animation with sound. Client A reloads → NPC plays reload animation
 5. No console spam visible in-game during any of the above
+
+**Full list of animations that are synced as of v0.5:**
+- turning on the spot
+- walking, running, sprinting
+- strafing
+- walking diagonally
+- crouching, walking while crouching
+- holstering, unholstering
+- aiming, aiming while crouching, aiming while moving
+- shooting, shooting while aiming
+- shooting with semi-auto, full-auto
+- attacking with melee one-handed, two-handed, fists
+- throwing spears, grenades
+- reloading
+- (un)holstering while crouching and standing up
 
 ---
 
