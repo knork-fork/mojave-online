@@ -117,15 +117,28 @@ This milestone is split into two sub-phases that are implemented together:
 
 ### v0.5a — Detection (State Sampling)
 
-Sampling animation state from actors (local player in v0.5, zone-owned NPCs in v0.7) to include in snapshots. The same detection logic applies to both — v0.5 proves it on the local player, v0.7 extends it to NPCs.
+Sampling animation state from actors (local player in v0.5, zone-owned NPCs in v0.7) to include in snapshots. The same detection logic applies to both — v0.5 proves it on the local player, v0.7 extends it to NPCs. All detection functions work for both players and NPCs.
 
-- Some animation states are detected locally based on movement (e.g. when plugin detects actor moving, the proper movement animation state is derived — idle, walking, running, direction)
-- Some animation states are based on actions received by the server (e.g. attacking, going into sneaking mode, weapon holstering, aiming)
-- `MovementState` sampled (Idle, Walk, Run, Sneak, SneakWalk, SneakRun) + movement direction
-- `weaponFormId` sampled (currently drawn weapon FormID, 0 = holstered)
-- `ActionState` sampled (None, Firing, Reloading, AimingIS)
-- `isSneaking` flag sampled
-- Need a weapon type check (melee vs ranged vs thrown) and action detection mechanism — detection research TBD
+**Plugin dependencies**: ShowOff NVSE (`IsAiming`, `GetEquippedWeaponType`), JIP LN NVSE (`IsAttacking`).
+
+**Movement direction** — inferred from position + rotation each tick:
+- Compute angle between position delta (movement vector) and `rotZ` (facing direction)
+- Map to 8-direction bin (45° sectors): Forward, Backward, Left, Right, ForwardLeft, ForwardRight, BackwardLeft, BackwardRight
+- No position change + rotation change → TurnLeft/TurnRight
+- No position change + no rotation change → None (idle)
+- Works correctly regardless of simultaneous mouse rotation
+
+**State flags** — polled per tick:
+- `IsRunning` (base game) → `isRunning` flag. Note: returns 1 in "run mode" even when idle (Caps Lock toggles), so only meaningful when combined with movement. Sprinting treated as running for v0.5
+- `IsSneaking` (base game) → `isSneaking` flag
+- `IsWeaponOut` (base game) → when changed, update `weaponFormId` via `GetEquippedWeapon`
+- `IsAiming` (ShowOff) → `ActionAimingIS` bit in `actionState`. Stays 1 during aimed fire
+- `IsAttacking` (JIP) → `ActionFiring` bit in `actionState`. Duration-based: stays 1 for full attack. Semi-auto/melee/thrown: one 0→1 = one attack. Automatic: stays 1 while firing
+- `GetAnimAction` (base game) → only used for reload: value 9 = `ActionReloading`
+
+**ActionState priority**: Reloading (highest) > Firing > AimingIS. Bitmask allows combinations (e.g. Firing|AimingIS = aimed fire)
+
+**Weapon type classification** — done on the *receiving* side, not the sending side. Receiver calls `GetEquippedWeaponType` (ShowOff) on the received `weaponFormId`: 0–2 = melee, 3–9 = ranged, 10–13 = thrown
 
 ### v0.5b — Application (State → Animation)
 
@@ -134,8 +147,9 @@ Applying received animation state to remote player NPCs. All findings from in-ga
 **Basic locomotion** (all loop, all work while restrained):
 - `PlayGroup` for Idle, Forward, Backward, FastForward, FastBackward, Left, Right, FastLeft, FastRight, TurnLeft, TurnRight
 - If actor is turning on the spot, use TurnLeft/TurnRight
-- If actor is moving diagonally, combine Forward/Backward with Left/Right at the same time (or FastForward with FastLeft/FastRight if running)
-- If actor is strafing (left/right without forward/backward), use Forward + Left/Right at the same time (yes, Forward despite not actually moving forward)
+- If actor is strafing (left/right without forward/backward), use just Left/Right (or FastLeft/FastRight if running)
+- If actor is moving diagonally, combine Forward/Backward with Left/Right at the same time (or FastForward/FastBackward with FastLeft/FastRight if running)
+- Backward diagonals supported: Backward + Left, Backward + Right (and fast variants)
 
 **Sneak** (requires unrestrain workaround):
 - `SetForceSneak 1` works but `SetRestrained` must be 0 first
@@ -176,6 +190,7 @@ Applying received animation state to remote player NPCs. All findings from in-ga
 **Other**:
 - Console output suppression via `SafeWrite8` on `Console::Print` (already proven in prototype)
 - Rename existing `PlayerSnapshot`/`NPCSnapshot` in codebase to unified `EntitySnapshot`/`EntityState` (see tech spec §4.2)
+- `EntityState` struct uses `moveDirection` + `isRunning` instead of old `movementState` enum (see tech spec §4.2, Appendix B)
 
 **Hardcoded**: nothing new; all state is sampled live
 

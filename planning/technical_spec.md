@@ -127,9 +127,10 @@ struct EntityState {
     uint32_t netEntityId;
     float    posX, posY, posZ;
     float    rotZ;           // yaw only for v1
-    uint8_t  movementState;  // enum: Idle, Walk, Run, Sneak, SneakWalk, SneakRun
+    uint8_t  moveDirection;  // enum: None, Forward, Backward, Left, Right, ForwardLeft, ForwardRight, BackwardLeft, BackwardRight, TurnLeft, TurnRight
+    uint8_t  isRunning;      // 1 = run mode, 0 = walk mode (only meaningful when moveDirection != None)
     uint32_t weaponFormId;   // currently drawn weapon (0 = holstered)
-    uint8_t  actionState;    // enum: None, Firing, Reloading, AimingIS
+    uint8_t  actionState;    // bitmask: None=0, Firing=1, Reloading=2, AimingIS=4 (combinations valid, e.g. Firing|AimingIS=5)
     uint8_t  isSneaking;     // 1 = sneaking, 0 = not sneaking
 };
 ```
@@ -400,8 +401,8 @@ All connected players are effectively companions to each other:
 ## 10. Animation Sync
 
 v0.5 is split into two sub-phases that are implemented together. These apply to all synced avatars — both remote player NPCs and zone-owner-reported NPCs:
-- **Detection**: Sampling animation state from the local player and from zone-owned NPCs. Some states are derived from movement (e.g. when plugin detects actor moving, the proper movement animation state is derived). Some states are based on actions (e.g. attacking, entering sneak mode, weapon holstering, aiming). Detection research is TBD.
-- **Application**: Applying received animation state to remote avatars via `PlayGroup` and related commands. This is fully researched below.
+- **Detection**: Sampling animation state from the local player and from zone-owned NPCs. Some states are derived from movement (position delta vs facing direction). Some states are polled from engine functions (`IsRunning`, `IsSneaking`, `IsAiming`, `IsAttacking`, `IsWeaponOut`, `GetAnimAction`). Fully researched — see §10.4.
+- **Application**: Applying received animation state to remote avatars via `PlayGroup` and related commands. Fully researched — see §10.1.
 
 ### 10.1 Application — All Avatars (Players and NPCs)
 
@@ -410,24 +411,32 @@ v0.5 is split into two sub-phases that are implemented together. These apply to 
 Basic locomotion animations all loop (e.g. `TurnLeft` will loop until another basic locomotion animation state is set). All work while restrained — no unrestrain workaround needed.
 
 - If actor is turning on the spot, use `TurnLeft` / `TurnRight`.
-- If actor is moving forward/backward diagonally, use `Forward`/`Backward` and `Left`/`Right` at the same time (or `FastForward` and `FastLeft`/`FastRight` if running).
-- If actor is strafing (going left/right without going forward or backward), use `Forward` + `Left`/`Right` at the same time (yes, `Forward` despite actor not actually moving forward).
+- If actor is strafing (going left/right without going forward or backward), use just `Left` / `Right` (or `FastLeft` / `FastRight` if running).
+- If actor is moving diagonally (forward/backward + left/right), use both animgroups at the same time (e.g. `Forward` + `Left`, or `FastForward` + `FastLeft` if running).
 
 | Animation | AnimGroup |
 |-----------|-----------|
 | Idle | `Idle` (0x00) |
 | Walk forward | `Forward` (0x03) |
 | Walk backward | `Backward` (0x04) |
-| Strafe left | `Forward` (0x03) + `Left` (0x05) |
-| Strafe right | `Forward` (0x03) + `Right` (0x06) |
+| Strafe left | `Left` (0x05) |
+| Strafe right | `Right` (0x06) |
 | Run forward | `FastForward` (0x07) |
 | Run backward | `FastBackward` (0x08) |
-| Run strafe left | `FastForward` (0x07) + `FastLeft` (0x09) |
-| Run strafe right | `FastForward` (0x07) + `FastRight` (0x0A) |
+| Run strafe left | `FastLeft` (0x09) |
+| Run strafe right | `FastRight` (0x0A) |
+| Diagonal forward-left | `Forward` (0x03) + `Left` (0x05) |
+| Diagonal forward-right | `Forward` (0x03) + `Right` (0x06) |
+| Diagonal backward-left | `Backward` (0x04) + `Left` (0x05) |
+| Diagonal backward-right | `Backward` (0x04) + `Right` (0x06) |
+| Run diagonal forward-left | `FastForward` (0x07) + `FastLeft` (0x09) |
+| Run diagonal forward-right | `FastForward` (0x07) + `FastRight` (0x0A) |
+| Run diagonal backward-left | `FastBackward` (0x08) + `FastLeft` (0x09) |
+| Run diagonal backward-right | `FastBackward` (0x08) + `FastRight` (0x0A) |
 | Turn left (on spot) | `TurnLeft` (0x0F) |
 | Turn right (on spot) | `TurnRight` (0x10) |
 
-Diagonal/strafing combinations: play both animgroups on the same tick (e.g. `Forward` + `Left` for diagonal forward-left walk).
+Diagonal combinations: play both animgroups on the same tick.
 
 #### Phase 2 — Sneak
 
@@ -457,7 +466,7 @@ Diagonal/strafing combinations: play both animgroups on the same tick (e.g. `For
 
 Most upper-body animations are independent of locomotion animations and can run at the same time (e.g. `AimIS` is kept despite changing from Idle to Forward and then back to Idle). They are also independent of `SetRestrained` — no unrestrain workaround needed for combat animations.
 
-Before the correct animation can be applied, there must be a check for whether the equipped weapon is melee, thrown, or ranged, and also whether a non-human NPC is performing the action. There also needs to be a way to detect when the actor is performing an action (both for the local player and for NPCs). This is detection-side research — TBD, mentioned here only as a requirement.
+Before the correct animation can be applied, the receiving client checks the weapon type via `GetEquippedWeaponType` (ShowOff NVSE) on the `weaponFormId` to determine melee vs ranged vs thrown (0–2 = melee, 3–9 = ranged, 10–13 = thrown). Detection of *when* the actor is performing an action is handled by polling engine functions — see §10.4.
 
 ##### Non-melee weapons (pistols, rifles)
 
@@ -505,7 +514,7 @@ The animation techniques in §10.1 apply equally to zone-owner-synced NPCs. The 
 
 - Zone owner sends `EntitySnapshot` containing per-NPC `EntityState` (same fields as player entities)
 - Non-owners apply position directly and set matching animations using the same engine application logic (§10.3)
-- v0.5 researches and proves the animation application techniques; v0.7 implements the zone-owner NPC detection and relay pipeline
+- v0.5 proves detection (§10.4) and application (§10.1–§10.3) on the local player; v0.7 extends the same detection to zone-owned NPCs
 - Combat targeting: zone owner sends target NetEntityId per NPC so non-owners can orient the NPC toward the correct target
 
 ### 10.3 Implementation
@@ -513,8 +522,9 @@ The animation techniques in §10.1 apply equally to zone-owner-synced NPCs. The 
 Two distinct layers:
 
 **Plugin state layer** — tracks authoritative state from network snapshots. Pure data, no engine calls:
-- `MovementState` — current locomotion mode + direction
-- `ActionState` — current upper-body action
+- `moveDirection` — movement direction relative to facing (None, Forward, Backward, Left, Right, ForwardLeft, ForwardRight, BackwardLeft, BackwardRight, TurnLeft, TurnRight)
+- `isRunning` — walk vs run mode (determines Walk vs Fast animation variants)
+- `actionState` — current upper-body action (bitmask: None, Firing, Reloading, AimingIS — combinations like Firing|AimingIS = aimed fire)
 - `weaponFormId` — currently drawn weapon (0 = holstered)
 - `isSneaking` — sneak mode flag
 
@@ -522,22 +532,86 @@ Two distinct layers:
 
 | Plugin state | Engine call | Notes |
 |---|---|---|
-| `MovementState` | `PlayGroup <AnimGroup>` | Every tick; all locomotion anims loop. Combine two animgroups for diagonal/strafing (e.g. `Forward` + `Left`) |
+| `moveDirection` + `isRunning` | `PlayGroup <AnimGroup>` | Every tick; all locomotion anims loop. Direction selects the animgroup(s), isRunning selects walk vs fast variant. Combine two animgroups for diagonals (e.g. `Forward` + `Left`). See §10.1 Phase 1 table |
 | `isSneaking` changed | Unrestrain → `SetForceSneak` → poll `IsSneaking` (returns text, not 0/1) → re-restrain | Same pattern as weapon draw/holster. Locomotion anims continue naturally after sneak toggle |
 | `weaponFormId` changed | Unrestrain → `SetWeaponOut` + `SetAlert` → poll `IsWeaponOut` → re-restrain | See §10.1 weapon draw/holster |
-| `ActionState` == Firing (ranged, not aiming) | `PlayGroup AttackLeft 1` + `PlaySound3D` (weapon sound) | Sound via `GetWeaponSound weapon 0`. Per shot |
-| `ActionState` == Firing (ranged, aiming) | `PlayGroup AttackLeftIS 1` → `PlayGroup AimIS 0` + `PlaySound3D` | Chain ensures return to AimIS after attack |
-| `ActionState` == Firing (melee) | `PlayGroup AttackRight 1` | Works for both 1H and 2H melee weapons |
-| `ActionState` == Firing (thrown) | `PlayGroup AttackThrow6 1` | Universal placeholder for all thrown weapons |
-| `ActionState` == Firing (creature) | Alert/unholster + `PlayGroup AttackRight 1` | Check alert state + melee weapon, not human/non-human |
-| `ActionState` == AimingIS | `PlayGroup AimIS 1` | Independent of SetRestrained and locomotion |
-| `ActionState` == Reloading | `PlayGroup ReloadA 1` | Independent of SetRestrained. Has built-in sound |
-| `ActionState` == None, weapon drawn | `PlayGroup Aim 1` | Weapon lowered idle stance |
-| `ActionState` == None, no weapon | Just locomotion | No upper-body override |
+| `actionState` has Firing (ranged, no AimingIS) | `PlayGroup AttackLeft 1` + `PlaySound3D` (weapon sound) | Sound via `GetWeaponSound weapon 0`. Per shot. Weapon type from `GetEquippedWeaponType` on `weaponFormId` |
+| `actionState` has Firing + AimingIS (ranged) | `PlayGroup AttackLeftIS 1` → `PlayGroup AimIS 0` + `PlaySound3D` | Chain ensures return to AimIS after attack |
+| `actionState` has Firing (melee) | `PlayGroup AttackRight 1` | Works for both 1H and 2H melee. Weapon type: `GetEquippedWeaponType` returns 0–2 |
+| `actionState` has Firing (thrown) | `PlayGroup AttackThrow6 1` | Universal placeholder. Weapon type: `GetEquippedWeaponType` returns 10–13 |
+| `actionState` has Firing (creature) | Alert/unholster + `PlayGroup AttackRight 1` | Check alert state + melee weapon, not human/non-human |
+| `actionState` == AimingIS only | `PlayGroup AimIS 1` | Independent of SetRestrained and locomotion |
+| `actionState` has Reloading | `PlayGroup ReloadA 1` | Independent of SetRestrained. Has built-in sound. Highest priority — overrides firing/aiming |
+| `actionState` == None, weapon drawn | `PlayGroup Aim 1` | Weapon lowered idle stance |
+| `actionState` == None, no weapon | Just locomotion | No upper-body override |
 
-A weapon type check (melee vs ranged vs thrown) is required before choosing the correct animgroup for `ActionState == Firing`. Detection mechanism for this is TBD.
+Weapon type classification on the receiving side uses `GetEquippedWeaponType` (ShowOff NVSE) on the received `weaponFormId`: 0–2 = melee → `AttackRight`, 3–9 = ranged → `AttackLeft`/`AttackLeftIS`, 10–13 = thrown → `AttackThrow6`.
 
 Console output suppression via `Console::Print` patch (already implemented in prototype).
+
+### 10.4 Detection (State Sampling)
+
+Detection runs **on the sender only** — the client that "owns" an actor polls its state and includes the results in the `EntityState` sent to the server. For the local player character, this is every client (v0.5). For zone-owned NPCs, this is the zone owner (v0.7). Receiving clients **never poll these functions** for remote actors — they apply the state received in snapshots via the engine application layer (§10.3).
+
+The same detection logic and functions apply to both players and NPCs. All functions below work for both.
+
+**Plugin dependencies**: ShowOff NVSE (`IsAiming`, `GetEquippedWeaponType`), JIP LN NVSE (`IsAttacking`). Both are common dependencies used by many mods.
+
+#### Movement direction (inferred from position + rotation)
+
+Each tick, compute position delta (current pos − previous pos) and rotation delta (current rotZ − previous rotZ):
+
+1. If position delta magnitude < idle threshold:
+   - If rotation delta > turn threshold → `TurnLeft` or `TurnRight` (based on sign)
+   - Else → `None` (idle)
+2. If position delta magnitude ≥ idle threshold:
+   - Compute angle between movement vector and current `rotZ`
+   - Map to 8-direction bin (45° sectors): Forward (~0°), ForwardRight (~45°), Right (~90°), BackwardRight (~135°), Backward (~180°), BackwardLeft (~-135°), Left (~-90°), ForwardLeft (~-45°)
+
+This works correctly regardless of simultaneous mouse rotation — the relative angle between instantaneous movement direction and instantaneous facing direction is always correct.
+
+#### State flags (polled per tick)
+
+| Function | Source | Returns | Maps to |
+|---|---|---|---|
+| `IsRunning` | Base game | 0/1 | `isRunning` flag. Note: returns 1 in "run mode" even when standing still (Caps Lock toggles). Only meaningful when combined with movement detection |
+| `IsSneaking` | Base game | 0/1 | `isSneaking` flag |
+| `IsWeaponOut` | Base game | 0/1 | When changed: update `weaponFormId` via `GetEquippedWeapon`. 0 → holstered (`weaponFormId = 0`) |
+| `IsAiming` | ShowOff NVSE | 0/1 | `ActionAimingIS` bit in `actionState`. Stays 1 during aimed fire (both `IsAiming` and `IsAttacking` are 1 simultaneously) |
+| `IsAttacking` | JIP LN NVSE | 0/1 | `ActionFiring` bit in `actionState`. Duration-based: stays 1 for the full attack. Semi-auto/melee/thrown: one 0→1 transition = one attack. Automatic: stays 1 while firing |
+| `GetAnimAction` | Base game | int | Only used for reload detection: value `9` = `ActionReloading` in `actionState` |
+
+#### ActionState priority (per tick)
+
+`actionState` is a bitmask built from the above flags:
+1. If `GetAnimAction == 9` → `ActionReloading` (highest priority, overrides all)
+2. If `IsAttacking == 1` → set `ActionFiring` bit
+3. If `IsAiming == 1` → set `ActionAimingIS` bit
+4. Both `ActionFiring | ActionAimingIS` = aimed fire (receiver plays `AttackLeftIS` → `AimIS`)
+5. `ActionFiring` alone = hip fire (receiver plays `AttackLeft`)
+6. `ActionAimingIS` alone = just aiming (receiver plays `AimIS`)
+7. Neither = `ActionNone`
+
+#### Weapon type classification (receiving side only)
+
+The sender transmits `weaponFormId`. The receiver calls `GetEquippedWeaponType` (ShowOff NVSE) on the weapon form to determine attack animgroup:
+
+| `GetEquippedWeaponType` | Category | Attack AnimGroup |
+|---|---|---|
+| 0 (HandToHandMelee) | Melee | `AttackRight` |
+| 1 (OneHandMelee) | Melee | `AttackRight` |
+| 2 (TwoHandMelee) | Melee | `AttackRight` |
+| 3 (OneHandPistol) | Ranged | `AttackLeft` / `AttackLeftIS` |
+| 4 (OneHandPistolEnergy) | Ranged | `AttackLeft` / `AttackLeftIS` |
+| 5 (TwoHandRifle) | Ranged | `AttackLeft` / `AttackLeftIS` |
+| 6 (TwoHandAutomatic) | Ranged | `AttackLeft` / `AttackLeftIS` |
+| 7 (TwoHandRifleEnergy) | Ranged | `AttackLeft` / `AttackLeftIS` |
+| 8 (TwoHandHandle) | Ranged | `AttackLeft` / `AttackLeftIS` |
+| 9 (TwoHandLauncher) | Ranged | `AttackLeft` / `AttackLeftIS` |
+| 10 (OneHandGrenade) | Thrown | `AttackThrow6` |
+| 11 (OneHandMine) | Thrown | `AttackThrow6` |
+| 12 (OneHandLunchboxMine) | Thrown | `AttackThrow6` |
+| 13 (OneHandThrown/Spears) | Thrown | `AttackThrow6` |
 
 ---
 
@@ -885,27 +959,37 @@ No chat system in v1. Players communicate via external tools (Discord, etc.).
 
 ---
 
-## Appendix B: MovementState Enum
+## Appendix B: MoveDirection Enum
 
 ```cpp
-enum MovementState : uint8_t {
-    Idle       = 0,
-    Walk       = 1,
-    Run        = 2,
-    Sneak      = 3,
-    SneakWalk  = 4,
-    SneakRun   = 5,
+enum MoveDirection : uint8_t {
+    DirNone          = 0,   // idle (or turning — see TurnLeft/TurnRight)
+    DirForward       = 1,
+    DirBackward      = 2,
+    DirLeft          = 3,   // pure strafe left
+    DirRight         = 4,   // pure strafe right
+    DirForwardLeft   = 5,   // diagonal
+    DirForwardRight  = 6,   // diagonal
+    DirBackwardLeft  = 7,   // diagonal
+    DirBackwardRight = 8,   // diagonal
+    DirTurnLeft      = 9,   // rotation changing, position not changing
+    DirTurnRight     = 10,  // rotation changing, position not changing
 };
 ```
 
-> **Note on directional composition**: `MovementState` encodes speed/sneak mode only. Direction (forward, backward, left, right, diagonal) is encoded separately in the snapshot. The application side combines multiple `PlayGroup` calls for diagonal and strafing movement — e.g. `Forward` + `Left` for a diagonal walk, `Forward` + `Right` for a right strafe. See §10.1 Phase 1 for the full table.
+> **Directional detection**: Computed from the angle between position delta (movement vector) and `rotZ` (facing direction). 45° sectors centered on each cardinal/diagonal direction. See §10.4 for detection logic.
+>
+> **Walk vs Run**: Encoded separately via `isRunning` flag (from `IsRunning` engine function). The application side selects walk vs fast animation variants — e.g. `DirForward` + `isRunning=0` → `PlayGroup Forward`, `DirForward` + `isRunning=1` → `PlayGroup FastForward`.
+>
+> **Sneaking**: Encoded separately via `isSneaking` flag. Sneaking does not have its own movement speed — locomotion animgroups (Forward, FastForward, etc.) work normally while in sneak posture. There is no "SneakRun" in-game; running while sneaking just uses FastForward etc. with sneak posture active.
+>
+> **Strafing vs diagonal**: Pure strafe (only Left/Right) and diagonal (Forward/Backward + Left/Right) use *different* animations. Pure strafe = `Left`/`Right` only. Diagonal = combination of `Forward`/`Backward` + `Left`/`Right`. See §10.1 Phase 1 table.
 
-## Appendix C: ActionState Enum
+## Appendix C: ActionState Bitmask
 
-Upper-body action overlaid on locomotion. Independent of `MovementState` — the receiving
-client combines both to determine the full animation. Upper-body animations are also independent of `SetRestrained` — no unrestrain workaround needed.
+Upper-body action overlaid on locomotion. Independent of `moveDirection` / `isRunning` — the receiving client combines both to determine the full animation. Upper-body animations are also independent of `SetRestrained` — no unrestrain workaround needed.
 
-**Plugin state** (network protocol values):
+**Plugin state** (network protocol values — bitmask, combinations valid):
 
 ```cpp
 enum ActionState : uint8_t {
@@ -913,24 +997,28 @@ enum ActionState : uint8_t {
     ActionFiring     = 1,  // attack (animgroup depends on weapon type)
     ActionReloading  = 2,  // weapon reload (ranged only)
     ActionAimingIS   = 4,  // iron sights (ranged only)
+    // Combinations:
+    // ActionFiring | ActionAimingIS = 5  → aimed fire (AttackLeftIS → AimIS)
 };
 ```
 
-Weapon draw/holster is tracked via `weaponFormId`, not `ActionState`.
-Sneak enter/exit is tracked via `isSneaking` flag, not `ActionState`.
+Weapon draw/holster is tracked via `weaponFormId`, not `actionState`.
+Sneak enter/exit is tracked via `isSneaking` flag, not `actionState`.
+
+**Detection** (see §10.4 for details): `actionState` is built per tick from `IsAttacking` (bit 1), `GetAnimAction == 9` (bit 2), and `IsAiming` (bit 4). Reloading has highest priority and overrides firing/aiming bits.
 
 **Engine application** (see §10.3 for full table):
 
-1. **Locomotion**: `PlayGroup` from `MovementState` + direction. All locomotion anims loop. Combine animgroups for diagonal/strafing.
+1. **Locomotion**: `PlayGroup` from `moveDirection` + `isRunning`. All locomotion anims loop. Combine animgroups for diagonals.
 2. **Sneak**: Unrestrain → `SetForceSneak` → poll `IsSneaking` (returns text `"is sneaking"` / `"is not sneaking"`, not 0/1) → re-restrain.
 3. **Weapon**: Temporary unrestrain + poll `IsWeaponOut` (see §10.1 weapon draw/holster).
-4. **Actions**: If `ActionState != None`, the animgroup depends on weapon type:
-   - `Firing` (ranged, not aiming) → `AttackLeft` (0x1A) + `PlaySound3D` (weapon sound)
-   - `Firing` (ranged, aiming) → `AttackLeftIS` (0x1D) → `AimIS` (0x14) with flag 0 + `PlaySound3D`
-   - `Firing` (melee) → `AttackRight` (0x20) — works for both 1H and 2H
-   - `Firing` (thrown) → `AttackThrow6` (0x96) — universal placeholder
+4. **Actions**: If `actionState != None`, the animgroup depends on weapon type (via `GetEquippedWeaponType` on `weaponFormId`):
+   - `Firing` (ranged, no AimingIS bit) → `AttackLeft` (0x1A) + `PlaySound3D` (weapon sound)
+   - `Firing | AimingIS` (ranged) → `AttackLeftIS` (0x1D) → `AimIS` (0x14) with flag 0 + `PlaySound3D`
+   - `Firing` (melee, type 0–2) → `AttackRight` (0x20) — works for both 1H and 2H
+   - `Firing` (thrown, type 10–13) → `AttackThrow6` (0x96) — universal placeholder
    - `Firing` (creature/non-human) → `AttackRight` (0x20) after alert/unholster
-   - `Reloading` → `ReloadA` (0xB1) — has built-in sound
-   - `AimingIS` → `AimIS` (0x14)
-5. **Idle stance**: If `ActionState == None` and `weaponFormId != 0`, `PlayGroup Aim` (0x11)
-6. **Default**: If `ActionState == None` and `weaponFormId == 0`, just locomotion
+   - `Reloading` → `ReloadA` (0xB1) — has built-in sound. Highest priority
+   - `AimingIS` only → `AimIS` (0x14)
+5. **Idle stance**: If `actionState == None` and `weaponFormId != 0`, `PlayGroup Aim` (0x11)
+6. **Default**: If `actionState == None` and `weaponFormId == 0`, just locomotion
