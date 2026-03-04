@@ -75,8 +75,8 @@ ENet rationale: provides exactly the reliability model we need (unreliable + rel
 
 | Rate | Value | Notes |
 |------|-------|-------|
-| Client send rate | 20 Hz | Client sends player snapshot to server 20 times/sec |
-| Server broadcast rate | 20 Hz | Server relays snapshots to other clients |
+| Client send rate | 30 Hz | Client sends player snapshot to server 20 times/sec |
+| Server broadcast rate | 30 Hz | Server relays snapshots to other clients |
 | Server logic tick | 30 Hz | Server processes events, health, ownership |
 | Client game tick | Engine rate (~60 Hz) | Client applies interpolated state every frame |
 
@@ -811,7 +811,7 @@ Every game tick (~60 Hz):
 │   └── Set position/rotation/animation for each remote NPC
 ├── Sample local player state
 ├── Check inventory sync triggers (container close, cell change, etc.)
-└── If send timer elapsed (20 Hz):
+└── If send timer elapsed (30 Hz):
     ├── Send EntitySnapshot (self) to server
     └── If zone owner: send EntitySnapshot (owned NPCs) to server
 ```
@@ -887,7 +887,7 @@ No chat system in v1. Players communicate via external tools (Discord, etc.).
 
 ### Phase 2: Player Sync
 - [ ] Client: sample local player position/rotation/movement each tick
-- [ ] Client: send EntitySnapshot at 20 Hz
+- [ ] Client: send EntitySnapshot at 30 Hz
 - [ ] Server: relay snapshots to other connected clients
 - [ ] Client: spawn remote player avatar NPCs (restrained, playerFaction, teammate, named)
 - [ ] Client: interpolation buffer + lerp positioning
@@ -897,7 +897,7 @@ No chat system in v1. Players communicate via external tools (Discord, etc.).
 - [ ] Server: zone tracking and ownership assignment
 - [ ] Client: detect zone entry/exit, report to server
 - [ ] Zone owner: detect and report NPC spawns
-- [ ] Zone owner: send NPC snapshots at 20 Hz
+- [ ] Zone owner: send NPC snapshots at 30 Hz
 - [ ] Non-owners: spawn + position NPCs from network data
 - [ ] Ownership transfer on owner departure
 

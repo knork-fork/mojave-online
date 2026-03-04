@@ -119,7 +119,7 @@ Library suggestion to evaluate:
 
 Tick rates:
 - Client send rate: 20–30 Hz
-- Snapshot broadcast: 20 Hz
+- Snapshot broadcast: 30 Hz
 - Server tick: 30 Hz
 
 Interpolation buffer: 100-150ms
@@ -241,7 +241,7 @@ Client:
 NPC Handling
 Zone owner:
 - Runs vanilla AI.
-- Every 20 Hz sends NPC snapshot: (NetEntityId, Position, Rotation, MovementState)
+- Every 30 Hz sends NPC snapshot: (NetEntityId, Position, Rotation, MovementState)
 
 Non-owners:
 Apply snapshot directly.

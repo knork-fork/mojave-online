@@ -333,7 +333,7 @@ int main(int argc, char* argv[])
 
         CheckTimeouts();
 
-        // Broadcast world snapshots at 20 Hz
+        // Broadcast world snapshots at 30 Hz
         double now = GetTime();
         g_broadcastAccum += (now - g_lastBroadcastTime);
         g_lastBroadcastTime = now;

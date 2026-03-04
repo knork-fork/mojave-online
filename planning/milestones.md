@@ -41,7 +41,7 @@
 
 **Scope**:
 - Client samples local player `posX, posY, posZ, rotZ, cellId` every game tick (only when a savegame is loaded — `parentCell` must be non-null)
-- Client sends `EntitySnapshot` at **20 Hz** (pos + rot + cellId; `movementState` hardcoded to `Idle`, `weaponFormId = 0`, `actionState = None`)
+- Client sends `EntitySnapshot` at **30 Hz** (pos + rot + cellId; `movementState` hardcoded to `Idle`, `weaponFormId = 0`, `actionState = None`)
 - Server receives `EntitySnapshot`, logs position to stdout (behind `--verbose` flag; off by default to avoid spam in later milestones)
 - Server stores latest snapshot per connected player (in memory)
 - Sequence numbers added to packet header (`uint16_t`)
@@ -63,7 +63,7 @@
 **Goal**: Server relays snapshots between two clients. Each client spawns a visible NPC representing the other player.
 
 **Scope**:
-- Server packs stored snapshots into `WorldSnapshot`, broadcasts to all **other** connected clients at 20 Hz
+- Server packs stored snapshots into `WorldSnapshot`, broadcasts to all **other** connected clients at 30 Hz
 - On first `WorldSnapshot` containing an unknown `NetEntityId`: spawn NPC via `PlaceAtMe` using hardcoded base form (`0x001206FD` — NCR trooper)
 - Configure spawned NPC as a restrained teammate:
   1. `SetRestrained 1` — prevents autonomous movement; position driven by network data. NPC remains visible to AI (targetable by hostile NPCs)
@@ -259,7 +259,7 @@ Applying received animation state to remote player NPCs. All findings from in-ga
 - **Zone owner responsibilities**:
   - Detects NPC spawns in cell, sends `SpawnNPC` (baseFormId, pos, rot, isPersistent)
   - Server assigns NetEntityId, broadcasts to all in zone
-  - Sends `EntitySnapshot` at 20 Hz (same format as player snapshots, batched for owned NPCs)
+  - Sends `EntitySnapshot` at 30 Hz (same format as player snapshots, batched for owned NPCs)
   - Sends `DespawnNPC` when NPCs leave/die
 - **Non-owner clients**:
   - Spawn matching NPC (same baseFormId) on receiving SpawnNPC
