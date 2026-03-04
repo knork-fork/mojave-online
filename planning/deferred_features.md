@@ -41,12 +41,14 @@ Features explicitly excluded from the initial version. These may be revisited in
 
 ## Animation
 
-- **Jump animation** — not synced
 - **Fine rotation** — only yaw (Z rotation) is synced; no pitch/roll
 - **Lip sync / facial expressions** — not synced
-- **Hit reactions / stagger** — not synced; each client's engine handles independently
-- **NPC weapon firing animations** — non-owners rely on position/rotation; combat visuals may differ
 - **Ragdoll sync** — each client handles ragdoll independently after Kill()
+
+## Projectile & Placed Entity Sync
+
+- **Thrown weapon projectiles** (grenades, spears, etc.) — the projectile entity itself is not synced between clients; only the throw animation plays on the remote avatar. The projectile exists only on the thrower's client. These weapons are more rarely used than standard ranged and melee weapons.
+- **Placed mines** — mines placed in the world are not synced; they exist only on the placer's client
 
 ## Combat
 

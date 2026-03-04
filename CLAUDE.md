@@ -57,6 +57,23 @@ This is a **multiplayer mod** for Fallout: New Vegas. Spawned "NPCs" are actuall
 - `BaseProcess::SetWeaponOut` virtual (C++ direct call) — flips flag but doesn't attach weapon mesh to grip node
 - Fixed delay instead of polling — works but unnecessarily slow and fragile
 
+## Animation testing (console)
+
+Reference commands for manually testing animations in-game via the FNV console. Open console with `~`, click on a spawned NPC to select it, then type commands.
+
+### Melee weapon test
+```
+; Give the NPC a baseball bat and have them equip it
+actor.AddItem 0000421C
+actor.EquipItem 0000421C
+; Disable the NPC AI
+actor.SetRestrained 1
+; Try out different melee attacks
+actor.PlayGroup AttackLeft 1
+actor.PlayGroup AttackRight 1
+actor.PlayGroup AttackPower 1
+```
+
 ## NVSE API gotchas
 
 - **`RunScriptLine2` bSuppressConsoleOutput is broken.** The `ToggleConsoleOutput` calls in `GameScript.cpp:349,366` are commented out. The bool parameter does nothing.

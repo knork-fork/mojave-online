@@ -41,8 +41,8 @@
 
 **Scope**:
 - Client samples local player `posX, posY, posZ, rotZ, cellId` every game tick (only when a savegame is loaded — `parentCell` must be non-null)
-- Client sends `PlayerSnapshot` at **20 Hz** (pos + rot + cellId; `movementState` hardcoded to `Idle`, `weaponFormId = 0`, `actionState = None`)
-- Server receives `PlayerSnapshot`, logs position to stdout (behind `--verbose` flag; off by default to avoid spam in later milestones)
+- Client sends `EntitySnapshot` at **20 Hz** (pos + rot + cellId; `movementState` hardcoded to `Idle`, `weaponFormId = 0`, `actionState = None`)
+- Server receives `EntitySnapshot`, logs position to stdout (behind `--verbose` flag; off by default to avoid spam in later milestones)
 - Server stores latest snapshot per connected player (in memory)
 - Sequence numbers added to packet header (`uint16_t`)
 
@@ -113,26 +113,79 @@
 
 **Goal**: Remote NPCs play correct locomotion and combat animations instead of sliding around in T-pose.
 
-**Scope**:
-- `MovementState` sampled from local player and included in `PlayerSnapshot` (Idle, Walk, Run, Sneak, SneakWalk, SneakRun)
+This milestone is split into two sub-phases that are implemented together:
+
+### v0.5a — Detection (State Sampling)
+
+Sampling animation state from actors (local player in v0.5, zone-owned NPCs in v0.7) to include in snapshots. The same detection logic applies to both — v0.5 proves it on the local player, v0.7 extends it to NPCs.
+
+- Some animation states are detected locally based on movement (e.g. when plugin detects actor moving, the proper movement animation state is derived — idle, walking, running, direction)
+- Some animation states are based on actions received by the server (e.g. attacking, going into sneaking mode, weapon holstering, aiming)
+- `MovementState` sampled (Idle, Walk, Run, Sneak, SneakWalk, SneakRun) + movement direction
 - `weaponFormId` sampled (currently drawn weapon FormID, 0 = holstered)
-- `ActionState` sampled (None, Firing, Reloading, Melee, AimingIS)
-- Receiving client applies every tick (all idempotent):
-  - **Locomotion**: `PlayGroup` matching `MovementState`
-  - **Weapon**: method TBD (depends on v0.4.5 research outcome)
-  - **Action**: `PlayGroup` for action anim if `ActionState != None`
-  - **Idle stance**: `PlayGroup Aim` if weapon drawn + no action
+- `ActionState` sampled (None, Firing, Reloading, AimingIS)
+- `isSneaking` flag sampled
+- Need a weapon type check (melee vs ranged vs thrown) and action detection mechanism — detection research TBD
+
+### v0.5b — Application (State → Animation)
+
+Applying received animation state to remote player NPCs. All findings from in-game research:
+
+**Basic locomotion** (all loop, all work while restrained):
+- `PlayGroup` for Idle, Forward, Backward, FastForward, FastBackward, Left, Right, FastLeft, FastRight, TurnLeft, TurnRight
+- If actor is turning on the spot, use TurnLeft/TurnRight
+- If actor is moving diagonally, combine Forward/Backward with Left/Right at the same time (or FastForward with FastLeft/FastRight if running)
+- If actor is strafing (left/right without forward/backward), use Forward + Left/Right at the same time (yes, Forward despite not actually moving forward)
+
+**Sneak** (requires unrestrain workaround):
+- `SetForceSneak 1` works but `SetRestrained` must be 0 first
+- After entering/exiting sneak, actor naturally continues whatever animgroup was active — no need for PlayGroup Idle after SetForceSneak
+- Basic locomotion animgroups applied normally while sneaking
+- `IsSneaking` used for polling before re-restraining; returns `"is sneaking"` / `"is not sneaking"` (text, not 1/0)
+
+**Weapon draw/holster** (requires unrestrain workaround):
+- Already researched — see v0.4 notes and tech spec §10.1
+
+**Non-melee weapons (pistols, rifles)** — all independent of SetRestrained:
+- Aiming: `PlayGroup AimIS 1` (aim down sights), `PlayGroup Aim 1` (lower weapon)
+- Hip-fire: `PlayGroup AttackLeft 1`
+- Aimed fire: `PlayGroup AttackLeftIS 1` → `PlayGroup AimIS 0` (0 ensures previous animation completes before returning to AimIS)
+- Reload: `PlayGroup ReloadA 1` (has built-in sound; weapon-specific variants like ReloadB deferred to v0.13)
+- AttackLeft/AttackLeftIS are animation only — no sound or muzzle flash
+- Sound per shot: `GetEquippedWeapon` → `GetWeaponSound weapon 0` ("Attack Sound 3D") → `PlaySound3D`
+- For every shot (single or one round of automatic fire), both attack animgroup and sound must be played
+- Automatic weapon sustained fire optimization deferred to v0.13
+- Muzzle flash deferred to v0.13
+
+**Melee weapons (swords, knives, power gloves)**:
+- `PlayGroup AttackRight 1` for both one-handed and two-handed — good enough for now
+- Multiple attack patterns, blocking deferred to v0.13
+
+**Thrown weapons (spears, grenades)**:
+- Highly weapon-dependent (spears = AttackThrow7, grenades = AttackThrow)
+- `PlayGroup AttackThrow6 1` as universal placeholder for all thrown weapons
+- Per-weapon mapping deferred to v0.13
+
+**Non-human attacks (creatures/animals)**:
+- Creature must "unholster" weapon first (enter alert combat state) before attack animation works
+- `PlayGroup AttackRight 1` as universal placeholder
+- No special human/non-human check needed — just check alert state + melee weapon equipped
+- `GetEquippedWeapon` shows "Fists" for creatures like dogs (despite animation being biting)
+- Attack variety deferred to v0.13
+
+**Other**:
 - Console output suppression via `SafeWrite8` on `Console::Print` (already proven in prototype)
+- Rename existing `PlayerSnapshot`/`NPCSnapshot` in codebase to unified `EntitySnapshot`/`EntityState` (see tech spec §4.2)
 
 **Hardcoded**: nothing new; all state is sampled live
 
-**Not included**: NPC animations (only player avatars), equipment visuals
+**Not included**: NPC animation detection and relay (researched here but implemented in v0.7 — zone owner samples NPC state, non-owners apply using the same techniques), equipment visuals, jump animations, stagger/hit reactions, muzzle flash, weapon-specific reload variants, per-weapon thrown animations, melee attack variety, automatic weapon fire optimization, creature attack variety (last seven deferred to v0.13)
 
 **Test**:
 1. Client A stands still → remote NPC in client B plays idle animation
 2. Client A walks → NPC walks. Client A runs → NPC runs. Client A sneaks → NPC sneaks
 3. Client A draws weapon → NPC draws weapon. Client A holsters → NPC holsters
-4. Client A fires → NPC plays fire animation. Client A reloads → NPC plays reload animation
+4. Client A fires → NPC plays fire animation with sound. Client A reloads → NPC plays reload animation
 5. No console spam visible in-game during any of the above
 
 ---
@@ -174,13 +227,13 @@
 - **Zone owner responsibilities**:
   - Detects NPC spawns in cell, sends `SpawnNPC` (baseFormId, pos, rot, isPersistent)
   - Server assigns NetEntityId, broadcasts to all in zone
-  - Sends `NPCSnapshot` at 20 Hz (position, rotation, movementState per NPC)
+  - Sends `EntitySnapshot` at 20 Hz (same format as player snapshots, batched for owned NPCs)
   - Sends `DespawnNPC` when NPCs leave/die
 - **Non-owner clients**:
   - Spawn matching NPC (same baseFormId) on receiving SpawnNPC
   - Disable AI on local copy (`SetActorsAI 0` — full disable; NPC copies are visual mirrors, not targetable)
-  - Apply position/rotation from NPCSnapshots (with interpolation)
-  - Apply basic locomotion animation (Idle/Walk/Run) from movementState
+  - Apply position/rotation from received EntitySnapshots (with interpolation)
+  - Apply animations using the same techniques proven in v0.5 (locomotion, sneak, weapon draw/holster, combat actions — see tech spec §10)
 - **Ownership transfer**:
   - Owner leaves zone → 5 s grace period → promote next player
   - Owner disconnects → immediate promotion
@@ -351,6 +404,35 @@
 
 ---
 
+## v0.13 — Advanced Animation & Combat Polish
+
+**Goal**: Improve animation fidelity with weapon-specific animations, additional combat visuals, and movement animations that were deferred from v0.5.
+
+**Scope**:
+- Weapon-specific reload variants (ReloadB, ReloadC, etc. — some weapons use different reload animations than ReloadA)
+- Per-weapon thrown animation mapping (spears use AttackThrow7, grenades use AttackThrow, etc. instead of universal AttackThrow6)
+- Multiple melee attack patterns and blocking (v0.5 uses only AttackRight for all melee)
+- Automatic weapon sustained fire optimization (server-side smoothing for smoother shooting animations)
+- Muzzle flash for ranged weapon attacks
+- Jump animations (JumpStart, JumpLoop, JumpLand)
+- Stagger / hit reaction / damage-taking animations
+- Non-human creature attack variety (v0.5 uses only AttackRight for all creatures)
+
+**Hardcoded**: nothing
+
+**Not included**: lip sync, facial expressions, ragdoll sync, fine rotation (pitch/roll)
+
+**Test**:
+1. Player reloads different weapon types → each plays the correct reload animation variant
+2. Player throws a spear → correct throw animation plays. Player throws a grenade → different animation
+3. Player uses melee weapon → varied attack patterns, not just AttackRight every time
+4. Player fires automatic weapon → smooth sustained fire animation on remote NPC
+5. Player fires ranged weapon → muzzle flash visible on remote NPC
+6. Player jumps → remote NPC plays jump start/loop/land sequence
+7. Player takes damage → remote NPC shows hit reaction
+
+---
+
 ## Milestone Dependency Graph
 
 ```
@@ -387,7 +469,11 @@ v0.11  Persistence + Bootstrap
   │
   v
 v0.12  Configuration + Polish
+  │
+  v
+v0.13  Advanced Animation & Combat Polish
 ```
 
 v0.6 (Launcher) and v0.7–v0.10 (gameplay systems) can be developed in parallel
 after v0.5 is complete. They converge at v0.11 where persistence ties everything together.
+v0.13 is an optional polish milestone after the core v1 feature set is complete.

@@ -119,50 +119,42 @@ Serialization: **raw packed C++ structs** for v1. All data is little-endian (bot
 
 ### 4.2 Message Types — Snapshots (Unreliable)
 
-#### PlayerSnapshot (Client → Server)
+All entities (players and NPCs) use the same per-entity state. There is no protocol distinction between a player avatar and an NPC avatar — the receiving client treats them identically.
+
+#### EntityState (common per-entity data)
 ```cpp
-struct PlayerSnapshot {
-    uint8_t  msgType;        // MSG_PLAYER_SNAPSHOT
-    uint32_t netEntityId;    // assigned by server at connect
+struct EntityState {
+    uint32_t netEntityId;
     float    posX, posY, posZ;
     float    rotZ;           // yaw only for v1
     uint8_t  movementState;  // enum: Idle, Walk, Run, Sneak, SneakWalk, SneakRun
     uint32_t weaponFormId;   // currently drawn weapon (0 = holstered)
-    uint8_t  actionState;    // enum: None, Firing, Reloading, Melee, AimingIS
+    uint8_t  actionState;    // enum: None, Firing, Reloading, AimingIS
+    uint8_t  isSneaking;     // 1 = sneaking, 0 = not sneaking
 };
 ```
+
+#### EntitySnapshot (Client → Server)
+```cpp
+struct EntitySnapshot {
+    uint8_t  msgType;        // MSG_ENTITY_SNAPSHOT
+    uint16_t entityCount;    // 1 for local player, N for zone-owned NPCs
+    // followed by entityCount × EntityState
+};
+```
+
+A regular client sends this with `entityCount = 1` (their own state). A zone owner sends a second `EntitySnapshot` per tick with `entityCount = N` for their owned NPCs. Both use the same message type and struct.
 
 #### WorldSnapshot (Server → Client)
 ```cpp
 struct WorldSnapshot {
     uint8_t  msgType;          // MSG_WORLD_SNAPSHOT
     uint16_t entityCount;
-    // followed by entityCount × EntityState:
-    struct EntityState {
-        uint32_t netEntityId;
-        float    posX, posY, posZ;
-        float    rotZ;
-        uint8_t  movementState;
-        uint32_t weaponFormId;
-        uint8_t  actionState;
-    };
+    // followed by entityCount × EntityState
 };
 ```
 
-#### NPCSnapshot (Zone Owner → Server)
-```cpp
-struct NPCSnapshot {
-    uint8_t  msgType;        // MSG_NPC_SNAPSHOT
-    uint16_t npcCount;
-    // followed by npcCount × NPCState:
-    struct NPCState {
-        uint32_t netEntityId;
-        float    posX, posY, posZ;
-        float    rotZ;
-        uint8_t  movementState;
-    };
-};
-```
+Contains all entities relevant to the receiving client (other players + NPCs in their zone). The client applies the same animation/position logic to every entity regardless of whether it represents a player or NPC.
 
 ### 4.3 Message Types — Events (Reliable)
 
@@ -407,30 +399,50 @@ All connected players are effectively companions to each other:
 
 ## 10. Animation Sync
 
-### 10.1 v1 Scope (Players)
+v0.5 is split into two sub-phases that are implemented together. These apply to all synced avatars — both remote player NPCs and zone-owner-reported NPCs:
+- **Detection**: Sampling animation state from the local player and from zone-owned NPCs. Some states are derived from movement (e.g. when plugin detects actor moving, the proper movement animation state is derived). Some states are based on actions (e.g. attacking, entering sneak mode, weapon holstering, aiming). Detection research is TBD.
+- **Application**: Applying received animation state to remote avatars via `PlayGroup` and related commands. This is fully researched below.
 
-Synced animations for player avatars, driven by two independent axes:
+### 10.1 Application — All Avatars (Players and NPCs)
 
-**Locomotion** (from `MovementState`):
+#### Phase 1 — Basic Locomotion
 
-| Animation | Trigger | AnimGroup |
-|-----------|---------|-----------|
-| Idle | `movementState == Idle` | `Idle` (0x00) |
-| Walk forward | `movementState == Walk` | `Forward` (0x03) |
-| Run forward | `movementState == Run` | `FastForward` (0x07) |
-| Sneak idle | `movementState == Sneak` | `Idle` (sneak variant) |
-| Sneak move | `movementState == SneakWalk` | `Forward` (sneak variant) |
-| Sneak run | `movementState == SneakRun` | `FastForward` (sneak variant) |
+Basic locomotion animations all loop (e.g. `TurnLeft` will loop until another basic locomotion animation state is set). All work while restrained — no unrestrain workaround needed.
 
-**Weapon draw/holster** (from `weaponFormId` changes):
+- If actor is turning on the spot, use `TurnLeft` / `TurnRight`.
+- If actor is moving forward/backward diagonally, use `Forward`/`Backward` and `Left`/`Right` at the same time (or `FastForward` and `FastLeft`/`FastRight` if running).
+- If actor is strafing (going left/right without going forward or backward), use `Forward` + `Left`/`Right` at the same time (yes, `Forward` despite actor not actually moving forward).
 
-| Animation | Trigger | Method |
-|-----------|---------|--------|
-| Drawing weapon | `weaponFormId` changed from 0 to non-zero | Temporary unrestrain + poll `IsWeaponOut` (see below) |
-| Holstering weapon | `weaponFormId` changed from non-zero to 0 | Temporary unrestrain + poll `IsWeaponOut` (see below) |
+| Animation | AnimGroup |
+|-----------|-----------|
+| Idle | `Idle` (0x00) |
+| Walk forward | `Forward` (0x03) |
+| Walk backward | `Backward` (0x04) |
+| Strafe left | `Forward` (0x03) + `Left` (0x05) |
+| Strafe right | `Forward` (0x03) + `Right` (0x06) |
+| Run forward | `FastForward` (0x07) |
+| Run backward | `FastBackward` (0x08) |
+| Run strafe left | `FastForward` (0x07) + `FastLeft` (0x09) |
+| Run strafe right | `FastForward` (0x07) + `FastRight` (0x0A) |
+| Turn left (on spot) | `TurnLeft` (0x0F) |
+| Turn right (on spot) | `TurnRight` (0x10) |
 
-> **Weapon draw/holster on restrained actors**
->
+Diagonal/strafing combinations: play both animgroups on the same tick (e.g. `Forward` + `Left` for diagonal forward-left walk).
+
+#### Phase 2 — Sneak
+
+`SetForceSneak 1` works, but `SetRestrained` must be set to `0` first (same unrestrain workaround pattern as weapon draw/holster).
+
+- After entering or exiting sneak, the actor naturally continues whatever locomotion animgroup was active before — there is no need to do `PlayGroup Idle` after `SetForceSneak`.
+- Basic locomotion animgroups (Idle, Forward, FastForward, etc.) are applied normally while sneaking.
+- `IsSneaking` can be used to poll whether the actor has entered/exited sneak mode, similarly to the `IsWeaponOut` workaround for holster/unholster. However, `IsSneaking` returns the strings `"is sneaking"` / `"is not sneaking"` instead of `1` / `0`.
+
+**Sneak enter**: `SetRestrained 0` → `SetForceSneak 1` → each tick poll `IsSneaking` → when returns `"is sneaking"`, `SetRestrained 1`
+
+**Sneak exit**: `SetRestrained 0` → `SetForceSneak 0` → each tick poll `IsSneaking` → when returns `"is not sneaking"`, `SetRestrained 1`
+
+#### Weapon Draw/Holster
+
 > `SetRestrained 1` suppresses the AI loop, which blocks `SetWeaponOut` and any animation requiring AI processing. The solution is to temporarily unrestrain the actor, trigger the animation, and poll `IsWeaponOut` each tick to re-restrain as soon as the state change is confirmed.
 >
 > Prerequisites (set once at NPC spawn): `SetCombatDisabled 1` (prevents combat during unrestrained windows). Per-tick `SetPos` (already applied for interpolation) corrects any autonomous movement.
@@ -441,42 +453,89 @@ Synced animations for player avatars, driven by two independent axes:
 >
 > `IsWeaponOut` updates before the animation visually finishes, but re-applying `SetRestrained 1` at that point is safe — the animation continues to completion. `SetAlert 1` keeps the weapon unholstered after draw; `SetAlert 0` allows holster to proceed.
 
-**Upper-body actions** (from `ActionState`, layered on top of locomotion):
+#### Phase 3/4 — Upper-Body Actions
 
-| Animation | Trigger | AnimGroup |
-|-----------|---------|-----------|
-| Weapon drawn idle | `actionState == None` and `weaponFormId != 0` | `Aim` (0x11) |
-| Firing (ranged) | `actionState == Firing` | `AttackLeft` (0x1A) |
-| Melee swing | `actionState == Melee` | `AttackLeft` (melee) / `AttackPower` (0x5C) |
-| Reloading | `actionState == Reloading` | `ReloadA`+ (0xB1+, weapon-dependent) |
-| Iron sights (tentative) | `actionState == AimingIS` | `AimIS` (0x14) |
+Most upper-body animations are independent of locomotion animations and can run at the same time (e.g. `AimIS` is kept despite changing from Idle to Forward and then back to Idle). They are also independent of `SetRestrained` — no unrestrain workaround needed for combat animations.
 
-NOT synced in v1: jumping, fine rotation, lip sync, facial expressions, hit reactions, stagger.
+Before the correct animation can be applied, there must be a check for whether the equipped weapon is melee, thrown, or ranged, and also whether a non-human NPC is performing the action. There also needs to be a way to detect when the actor is performing an action (both for the local player and for NPCs). This is detection-side research — TBD, mentioned here only as a requirement.
 
-### 10.2 v1 Scope (NPCs)
+##### Non-melee weapons (pistols, rifles)
 
-- Zone owner sends `(position, rotation, movementState)` per NPC
-- Non-owners apply position directly and set matching animation group
+While a non-melee weapon is unholstered:
+- **Aiming**: `PlayGroup AimIS 1` (actor starts aiming down the sights). Stopped with `PlayGroup Aim 1` (actor lowers their weapon into normal position). Works independent of `SetRestrained`, no further action needed.
+- **Reloading**: `PlayGroup ReloadA 1` for most weapons tested (also independent of `SetRestrained`). Some weapons have a slightly different animation (e.g. `ReloadB`) — leave weapon-specific reload variants for v0.13.
+- **Hip-fire (not aiming)**: `PlayGroup AttackLeft 1`.
+- **Aimed fire**: `PlayGroup AttackLeftIS 1`, however the weapon gets lowered out of aim-down-sights as soon as the animation completes. To maintain AimIS after firing, chain: `PlayGroup AttackLeftIS 1` → `PlayGroup AimIS 0` (the `0` flag ensures the previous animation completes before starting the new one, so as soon as `AttackLeftIS` finishes the actor returns to `AimIS` state).
+- **Sound**: `ReloadA` comes with sound by default. `AttackLeft` / `AttackLeftIS` are animation only — no sound or muzzle flash. For sound, use:
+  ```
+  ref rWeapon
+  ref rSound
+  set rWeapon to actor.GetEquippedWeapon
+  set rSound to GetWeaponSound rWeapon 0   ; 0 = "Attack Sound 3D"
+  actor.PlaySound3D rSound
+  ```
+  For every shot the actor takes (single shot or one round of automatic fire), both `AttackLeft`/`AttackLeftIS` and sound need to be played.
+- **Muzzle flash**: Not included — deferred to v0.13.
+- **Automatic weapons**: Server can handle this in a more optimized way so shooting is more smooth — deferred to v0.13.
+
+##### Melee weapons (swords, knives, power gloves)
+
+Melee weapons are complicated (multiple different attack patterns, blocking, etc.), but for now `PlayGroup AttackRight 1` is good enough for both one-handed and two-handed melee weapons. Leave the rest for v0.13.
+
+##### Thrown weapons (spears, grenades)
+
+Thrown weapon animation is highly dependent on the weapon itself — e.g. spears use `AttackThrow7`, grenades use `AttackThrow`. For now, use `PlayGroup AttackThrow6 1` for all thrown weapons. Leave per-weapon mapping for v0.13.
+
+##### Non-human attacks (creatures/animals)
+
+Like melee weapons, there are multiple different attack types — leave variety for v0.13. For now:
+- A creature/animal needs to "unholster" their "weapon" first (i.e. enter alert combat state) before attack animations can be played.
+- `PlayGroup AttackRight 1` works well enough as a universal placeholder.
+- Example: for a dog attack, the unarmed weapon must first be unholstered (dog enters alert combat state), then attack animation can play.
+- There doesn't need to be a special check for whether the NPC is human or not — just checking for alert state and whether a melee weapon is equipped is enough.
+- For NPCs like dogs, `GetEquippedWeapon` shows "Fists" (despite the actual animation being biting).
+
+#### Not synced in v0.5 (deferred to v0.13)
+
+Jump animations, stagger / hit reaction / damage-taking animations, muzzle flash, weapon-specific reload variants (ReloadB, ReloadC, etc.), per-weapon thrown animations, multiple melee attack patterns and blocking, automatic weapon sustained fire optimization, non-human creature attack variety. Also not synced: fine rotation, lip sync, facial expressions.
+
+### 10.2 NPC Animation Scope
+
+The animation techniques in §10.1 apply equally to zone-owner-synced NPCs. The zone owner samples NPC state (detection) and non-owner clients apply it (application) using the same PlayGroup calls.
+
+- Zone owner sends `EntitySnapshot` containing per-NPC `EntityState` (same fields as player entities)
+- Non-owners apply position directly and set matching animations using the same engine application logic (§10.3)
+- v0.5 researches and proves the animation application techniques; v0.7 implements the zone-owner NPC detection and relay pipeline
 - Combat targeting: zone owner sends target NetEntityId per NPC so non-owners can orient the NPC toward the correct target
-- NPC weapon firing animations are NOT explicitly synced — non-owners rely on position/rotation updates; combat visuals may differ slightly between clients
 
 ### 10.3 Implementation
 
 Two distinct layers:
 
 **Plugin state layer** — tracks authoritative state from network snapshots. Pure data, no engine calls:
-- `MovementState` — current locomotion mode
+- `MovementState` — current locomotion mode + direction
 - `ActionState` — current upper-body action
 - `weaponFormId` — currently drawn weapon (0 = holstered)
+- `isSneaking` — sneak mode flag
 
-**Engine application layer** — translates plugin state into engine calls each tick. These calls are idempotent — no need to track previous state or detect transitions:
+**Engine application layer** — translates plugin state into engine calls each tick:
 
 | Plugin state | Engine call | Notes |
 |---|---|---|
-| `MovementState` | `PlayGroup <AnimGroup>` | Every tick; idempotent, prevents engine reverting to idle |
-| `weaponFormId` | Temporary unrestrain + poll `IsWeaponOut` | See §10.1 weapon draw/holster note |
-| `ActionState` (non-None) | `PlayGroup <ActionAnimGroup>` | Every tick; idempotent |
-| `ActionState` (None) | No action call | Engine stays in locomotion/aim stance |
+| `MovementState` | `PlayGroup <AnimGroup>` | Every tick; all locomotion anims loop. Combine two animgroups for diagonal/strafing (e.g. `Forward` + `Left`) |
+| `isSneaking` changed | Unrestrain → `SetForceSneak` → poll `IsSneaking` (returns text, not 0/1) → re-restrain | Same pattern as weapon draw/holster. Locomotion anims continue naturally after sneak toggle |
+| `weaponFormId` changed | Unrestrain → `SetWeaponOut` + `SetAlert` → poll `IsWeaponOut` → re-restrain | See §10.1 weapon draw/holster |
+| `ActionState` == Firing (ranged, not aiming) | `PlayGroup AttackLeft 1` + `PlaySound3D` (weapon sound) | Sound via `GetWeaponSound weapon 0`. Per shot |
+| `ActionState` == Firing (ranged, aiming) | `PlayGroup AttackLeftIS 1` → `PlayGroup AimIS 0` + `PlaySound3D` | Chain ensures return to AimIS after attack |
+| `ActionState` == Firing (melee) | `PlayGroup AttackRight 1` | Works for both 1H and 2H melee weapons |
+| `ActionState` == Firing (thrown) | `PlayGroup AttackThrow6 1` | Universal placeholder for all thrown weapons |
+| `ActionState` == Firing (creature) | Alert/unholster + `PlayGroup AttackRight 1` | Check alert state + melee weapon, not human/non-human |
+| `ActionState` == AimingIS | `PlayGroup AimIS 1` | Independent of SetRestrained and locomotion |
+| `ActionState` == Reloading | `PlayGroup ReloadA 1` | Independent of SetRestrained. Has built-in sound |
+| `ActionState` == None, weapon drawn | `PlayGroup Aim 1` | Weapon lowered idle stance |
+| `ActionState` == None, no weapon | Just locomotion | No upper-body override |
+
+A weapon type check (melee vs ranged vs thrown) is required before choosing the correct animgroup for `ActionState == Firing`. Detection mechanism for this is TBD.
 
 Console output suppression via `Console::Print` patch (already implemented in prototype).
 
@@ -678,8 +737,8 @@ Every game tick (~60 Hz):
 ├── Sample local player state
 ├── Check inventory sync triggers (container close, cell change, etc.)
 └── If send timer elapsed (20 Hz):
-    ├── Send PlayerSnapshot to server
-    └── If zone owner: send NPCSnapshot to server
+    ├── Send EntitySnapshot (self) to server
+    └── If zone owner: send EntitySnapshot (owned NPCs) to server
 ```
 
 ---
@@ -753,7 +812,7 @@ No chat system in v1. Players communicate via external tools (Discord, etc.).
 
 ### Phase 2: Player Sync
 - [ ] Client: sample local player position/rotation/movement each tick
-- [ ] Client: send PlayerSnapshot at 20 Hz
+- [ ] Client: send EntitySnapshot at 20 Hz
 - [ ] Server: relay snapshots to other connected clients
 - [ ] Client: spawn remote player avatar NPCs (restrained, playerFaction, teammate, named)
 - [ ] Client: interpolation buffer + lerp positioning
@@ -839,33 +898,39 @@ enum MovementState : uint8_t {
 };
 ```
 
+> **Note on directional composition**: `MovementState` encodes speed/sneak mode only. Direction (forward, backward, left, right, diagonal) is encoded separately in the snapshot. The application side combines multiple `PlayGroup` calls for diagonal and strafing movement — e.g. `Forward` + `Left` for a diagonal walk, `Forward` + `Right` for a right strafe. See §10.1 Phase 1 for the full table.
+
 ## Appendix C: ActionState Enum
 
 Upper-body action overlaid on locomotion. Independent of `MovementState` — the receiving
-client combines both to determine the full animation.
+client combines both to determine the full animation. Upper-body animations are also independent of `SetRestrained` — no unrestrain workaround needed.
 
 **Plugin state** (network protocol values):
 
 ```cpp
 enum ActionState : uint8_t {
     ActionNone       = 0,  // no special action
-    ActionFiring     = 1,  // ranged attack
-    ActionReloading  = 2,  // weapon reload
-    ActionMelee      = 3,  // melee swing
-    ActionAimingIS   = 4,  // iron sights [tentative]
+    ActionFiring     = 1,  // attack (animgroup depends on weapon type)
+    ActionReloading  = 2,  // weapon reload (ranged only)
+    ActionAimingIS   = 4,  // iron sights (ranged only)
 };
 ```
 
 Weapon draw/holster is tracked via `weaponFormId`, not `ActionState`.
+Sneak enter/exit is tracked via `isSneaking` flag, not `ActionState`.
 
-**Engine application** (applied every tick, all calls idempotent):
+**Engine application** (see §10.3 for full table):
 
-1. **Locomotion**: `PlayGroup` from `MovementState` (`Forward`, `FastForward`, sneak variants, etc.)
-2. **Weapon**: Temporary unrestrain + poll `IsWeaponOut` (see §10.1)
-3. **Actions**: If `ActionState != None`, `PlayGroup` the action anim:
-   - `Firing` → `AttackLeft` (0x1A)
-   - `Reloading` → `ReloadA`+ (0xB1+, weapon-dependent)
-   - `Melee` → `AttackLeft` (melee) / `AttackPower` (0x5C)
+1. **Locomotion**: `PlayGroup` from `MovementState` + direction. All locomotion anims loop. Combine animgroups for diagonal/strafing.
+2. **Sneak**: Unrestrain → `SetForceSneak` → poll `IsSneaking` (returns text `"is sneaking"` / `"is not sneaking"`, not 0/1) → re-restrain.
+3. **Weapon**: Temporary unrestrain + poll `IsWeaponOut` (see §10.1 weapon draw/holster).
+4. **Actions**: If `ActionState != None`, the animgroup depends on weapon type:
+   - `Firing` (ranged, not aiming) → `AttackLeft` (0x1A) + `PlaySound3D` (weapon sound)
+   - `Firing` (ranged, aiming) → `AttackLeftIS` (0x1D) → `AimIS` (0x14) with flag 0 + `PlaySound3D`
+   - `Firing` (melee) → `AttackRight` (0x20) — works for both 1H and 2H
+   - `Firing` (thrown) → `AttackThrow6` (0x96) — universal placeholder
+   - `Firing` (creature/non-human) → `AttackRight` (0x20) after alert/unholster
+   - `Reloading` → `ReloadA` (0xB1) — has built-in sound
    - `AimingIS` → `AimIS` (0x14)
-4. **Idle stance**: If `ActionState == None` and `weaponFormId != 0`, `PlayGroup Aim` (0x11)
-5. **Default**: If `ActionState == None` and `weaponFormId == 0`, just locomotion
+5. **Idle stance**: If `ActionState == None` and `weaponFormId != 0`, `PlayGroup Aim` (0x11)
+6. **Default**: If `ActionState == None` and `weaponFormId == 0`, just locomotion
