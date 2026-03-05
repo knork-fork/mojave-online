@@ -222,6 +222,18 @@ Applying received animation state to remote player NPCs. All findings from in-ga
 
 ---
 
+## v0.5.1 — Crouching + Holster fix
+
+**Problems**:
+- Holster/unholster on client happens with a noticable delay compared to player pressing and holding 'R'
+- Crouching and (un)holstering don't get played on actor if any locomotion animation other than idle is playing
+  - This is shown as player moving at different speed despite still being in wrong crouch/holster state for that speed
+  - As soon as player stops working, crouch/holster animations play
+  - High probability of SetRestrained workaround 
+- In case of crouching, sometimes crouch state gets stuck and actor remains in crouched position indefinitely
+
+---
+
 ## v0.6 — Launcher + Identity
 
 **Goal**: Players connect via a launcher instead of hardcoded values. Players have persistent identity (token) and display names.
