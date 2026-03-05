@@ -229,7 +229,7 @@ Applying received animation state to remote player NPCs. All findings from in-ga
 - Crouching and (un)holstering don't get played on actor if any locomotion animation other than idle is playing
   - This is shown as player moving at different speed despite still being in wrong crouch/holster state for that speed
   - As soon as player stops working, crouch/holster animations play
-  - High probability of SetRestrained workaround 
+  - High probability of issue with SetRestrained workaround 
 - In case of crouching, sometimes crouch state gets stuck and actor remains in crouched position indefinitely
 
 ---
