@@ -8,7 +8,7 @@
 // --------------------------------------------------
 
 static constexpr float PI = 3.14159265f;
-static constexpr int BUFFER_SIZE = 3;
+static constexpr int BUFFER_SIZE = 5;
 
 struct SnapshotSample {
     float  posX, posY, posZ;

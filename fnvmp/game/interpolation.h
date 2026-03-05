@@ -3,8 +3,9 @@
 #include <cstdint>
 
 // Interpolation constants
-static constexpr double INTERP_DELAY    = 0.075;  // 75ms render delay
-static constexpr double EXTRAP_TIMEOUT  = 0.500;  // 500ms before freezing
+// Render delay = 2 packet intervals — enough to absorb one dropped/late packet.
+static constexpr double INTERP_DELAY    = 2.0 / 30.0;  // ~67ms at 30Hz send rate
+static constexpr double EXTRAP_TIMEOUT  = 0.500;        // 500ms before freezing
 
 // Push a new position/rotation sample for an entity.
 // localTime = client-local monotonic clock at time of receipt.
