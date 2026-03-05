@@ -228,9 +228,27 @@ Applying received animation state to remote player NPCs. All findings from in-ga
 - Holster/unholster on client happens with a noticable delay compared to player pressing and holding 'R'
 - Crouching and (un)holstering don't get played on actor if any locomotion animation other than idle is playing
   - This is shown as player moving at different speed despite still being in wrong crouch/holster state for that speed
-  - As soon as player stops working, crouch/holster animations play
-  - High probability of issue with SetRestrained workaround 
+  - As soon as player stops moving, crouch/holster animations play
+  - High probability of issue with SetRestrained workaround
 - In case of crouching, sometimes crouch state gets stuck and actor remains in crouched position indefinitely
+
+**Root cause**: Active `PlayGroup` locomotion (Forward, Backward, etc.) blocks AI-driven `SetWeaponOut`/`SetForceSneak` transitions. `PlayGroup` takes full-body animation control, preventing the AI loop from processing weapon/sneak state changes. When locomotion drops to Idle (player stops), transitions go through immediately.
+
+Confirmed via console testing:
+- `PlayGroup Forward 1` → `SetWeaponOut 0` → holster blocked
+- `PlayGroup Idle 1` → holster plays immediately
+- `PlayGroup Equip 1` — no effect (on restrained or unrestrained actors)
+- `PlayAnimationPath "Characters\_Male\1hpEquip.kf"` — animation layers on top of locomotion, but weapon mesh disappears (visual-only, no game state change)
+
+Stuck sneak: `PollUnrestrain` timeout clears `pendingOps` but `prevIsSneaking` was already updated, so the mismatch is lost and sneak is never retried.
+
+**Proposed solutions** (not yet implemented):
+
+1. **Replace `PlayGroup` locomotion with kNVSE `ActivateAnim`** — `ActivateAnim` plays animations via the overlay system at specified priority/weight rather than taking over the animation graph. If locomotion played this way doesn't block the AI loop, `SetWeaponOut`/`SetForceSneak` would work alongside it. Requires knowing KF file paths for all locomotion variants (Forward, FastForward, Backward, etc.) and manual lifecycle management (`DeactivateAnim` on transitions). Significant refactor.
+
+2. **Defer `prevIsSneaking` update** — only update `prevIsSneaking` after sneak transition completes (not on every tick). If the transition times out, the mismatch persists and `ApplySneak` retries automatically. Already prototyped in code but sneak still gets stuck — needs further investigation.
+
+3. **Brief Idle gap** — play `PlayGroup Idle 1` when entering unrestrain window to clear locomotion block, then resume locomotion after transition completes. Downside: actor stops walking during holster/sneak, visible as floating/sliding while `SetPos` continues.
 
 ---
 
